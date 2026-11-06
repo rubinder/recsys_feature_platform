@@ -1,0 +1,10 @@
+500 requests per run, warm users, seeded sample
+concurrency   p50 ms   p95 ms   p99 ms    req/s errors
+          1    14.51    16.18    78.74     63.1      0
+          8   118.58   196.15   216.52     62.6      0
+
+server-side stages (concurrency 1):
+  candidates       p50    0.08 ms   p95    0.11 ms   p99    0.38 ms
+  online_features  p50   11.57 ms   p95   12.69 ms   p99   74.73 ms
+  ranking          p50    0.78 ms   p95    0.93 ms   p99    1.17 ms
+  total            p50   12.42 ms   p95   13.74 ms   p99   75.72 ms

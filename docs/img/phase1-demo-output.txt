@@ -1,0 +1,17 @@
+
+User 6040: features as of 2000-12-29T00:00:00+00:00, model run f0d27af47de1418a9e59789476968f83
+Top-rated history: Dracula (1958); After Life (1998); Sweet Hereafter, The (1997); Blue Velvet (1986); 12 Angry Men (1957)
+
+Top 10 recommendations (two_stage):
+   1. Back to the Future (1985)                               ranker +0.173  als 0.897
+   2. Princess Bride, The (1987)                              ranker -0.070  als 0.749
+   3. Matrix, The (1999)                                      ranker -0.101  als 0.695
+   4. Toy Story 2 (1999)                                      ranker -0.116  als 0.865
+   5. Roger & Me (1989)                                       ranker -0.322  als 0.989
+   6. Big (1988)                                              ranker -0.441  als 0.770
+   7. Clerks (1994)                                           ranker -0.454  als 0.538
+   8. Total Recall (1990)                                     ranker -0.493  als 0.569
+   9. Boat, The (Das Boot) (1981)                             ranker -0.495  als 1.090
+  10. There's Something About Mary (1998)                     ranker -0.497  als 0.494
+
+Latency (ms): candidates 0.28, online_features 29.53, ranking 1.60, total 31.42

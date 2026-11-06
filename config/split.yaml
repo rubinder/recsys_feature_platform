@@ -1,0 +1,21 @@
+# Fixed, time-based evaluation protocol. Reused by every phase. Do not change
+# without re-running everything; later phases compare against these cutoffs.
+#
+# Chosen from MovieLens 1M event quantiles: ~80% of events fall before
+# train_end and ~90% before validation_end. Both cutoffs sit on the weekly
+# snapshot grid (validation_end - 7k days) so anchors line up with snapshots.
+#
+#   train       [start, train_end)            ALS for ranker labels fit on
+#                                             [start, train_end - ranker_window)
+#   ranker      [train_end - ranker_window, train_end)  weekly anchors, labels
+#   validation  [train_end, validation_end)   ranker early stopping + val metrics
+#   test        [validation_end, end of data] final offline metrics; serving "now"
+train_end: 2000-12-01T00:00:00+00:00
+validation_end: 2000-12-29T00:00:00+00:00
+ranker_window_days: 28
+label_window_days: 7
+snapshot_cadence_days: 7
+candidates_k: 200
+top_n: 10
+eval_k: [10, 50]
+seed: 42
