@@ -3,15 +3,20 @@
 1. Ranker training rows: weekly anchors in the last `ranker_window_days` of the
    training period; validation rows: weekly anchors in the validation period.
    ALS is refit per anchor on events before it, exactly as serving would.
-2. Feast get_historical_features joins point-in-time features onto every row.
+2. Feast get_historical_features joins point-in-time features onto every row;
+   with the streaming feature set, request-time derived features are added per
+   anchor from that anchor's ALS model.
 3. LightGBM LambdaRank trains with early stopping on validation NDCG.
 4. Final ALS is fit on everything before validation_end (serving "now"), and
    both ALS-only and two-stage are evaluated on the test period.
 5. Everything is logged to one MLflow run; serving loads models by its run id.
+
+Usage: python -m recsys.training.train [--feature-set batch|streaming]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import tempfile
@@ -26,22 +31,37 @@ from recsys import tracking
 from recsys.config import ARTIFACTS, OFFLINE, RAW, load_split
 from recsys.eval import evaluate
 from recsys.feature_repo.store import get_store
-from recsys.features.features import FEATURE_REFS, MODEL_FEATURES, to_matrix
+from recsys.features.features import FEATURE_SETS, FeatureSet, to_matrix
 from recsys.training import candidates, labels, ranker
 
 log = logging.getLogger(__name__)
-LATEST_RUN = ARTIFACTS / "latest_run_id"
+SORT = (["event_timestamp", "user_id", "als_score", "item_id"], [True, True, False, True])
 
 
-def _rows(events, anchor_list, horizon_end, split):
+def variant_name(feature_set: str, anchor_mode: str) -> str:
+    return feature_set if anchor_mode == "weekly" else f"{feature_set}_session"
+
+
+def run_id_file(variant: str) -> Path:
+    """Where the latest run id per variant is recorded (Phase 1's batch/weekly keeps its name)."""
+    return ARTIFACTS / ("latest_run_id" if variant == "batch" else f"latest_run_id_{variant}")
+
+
+def _rows(events, anchor_list, horizon_end, split, store, fs: FeatureSet, anchor_mode: str):
     frames, stats = [], []
     for t in anchor_list:
-        end = min(t + pd.Timedelta(days=split.label_window_days), horizon_end)
-        rows, s = labels.build_rows(events, t, end, split.candidates_k, split.seed)
-        frames.append(rows)
+        if anchor_mode == "weekly":
+            end = min(t + pd.Timedelta(days=split.label_window_days), horizon_end)
+            rows, s, model = labels.build_rows(events, t, end, split.candidates_k, split.seed)
+            frames.append(evaluate.prepare(store, rows, fs, model, t))
+        else:
+            week_end = t + pd.Timedelta(days=split.snapshot_cadence_days)
+            rows, s, model = labels.build_session_rows(
+                events, t, week_end, horizon_end, split.label_window_days, split.candidates_k, split.seed)
+            frames.append(evaluate.prepare(store, rows, fs, model, None))
         stats.append(s)
-    rows = pd.concat(frames, ignore_index=True).sort_values(["event_timestamp", "user_id", "als_score", "item_id"], ascending=[True, True, False, True], ignore_index=True)
-    return rows, stats
+    rows = pd.concat(frames, ignore_index=True)
+    return rows.sort_values(SORT[0], ascending=SORT[1], ignore_index=True), stats
 
 
 def _groups(rows: pd.DataFrame) -> np.ndarray:
@@ -55,8 +75,7 @@ def popular_items(t, n: int = 100) -> list[int]:
     return pop.sort_values(["item_interaction_count", "item_id"], ascending=[False, True]).item_id.head(n).tolist()
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+def train(fs: FeatureSet, anchor_mode: str = "weekly") -> tuple[str, dict]:
     split = load_split()
     store = get_store()
     events = pd.read_parquet(RAW / "events.parquet")
@@ -64,42 +83,45 @@ def main() -> None:
 
     train_anchors = labels.anchors(split.train_end, split.ranker_window_days, split.snapshot_cadence_days)
     val_anchors = labels.anchors(split.validation_end, split.ranker_window_days, split.snapshot_cadence_days)
-    train_rows, train_stats = _rows(events, train_anchors, split.train_end, split)
-    val_rows, val_stats = _rows(events, val_anchors, split.validation_end, split)
+    train_rows, train_stats = _rows(events, train_anchors, split.train_end, split, store, fs, anchor_mode)
+    val_rows, val_stats = _rows(events, val_anchors, split.validation_end, split, store, fs, anchor_mode)
+    log.info("feature set %s: %d train rows, %d validation rows", fs.name, len(train_rows), len(val_rows))
 
-    log.info("point-in-time feature join: %d train rows, %d validation rows", len(train_rows), len(val_rows))
-    train_rows = evaluate.with_features(store, train_rows).sort_values(["event_timestamp", "user_id", "als_score", "item_id"], ascending=[True, True, False, True], ignore_index=True)
-    val_rows = evaluate.with_features(store, val_rows).sort_values(["event_timestamp", "user_id", "als_score", "item_id"], ascending=[True, True, False, True], ignore_index=True)
-
+    cols = fs.model_features
     booster = ranker.fit(
-        to_matrix(train_rows), train_rows.label.to_numpy(), _groups(train_rows),
-        to_matrix(val_rows), val_rows.label.to_numpy(), _groups(val_rows),
-        MODEL_FEATURES, split.seed,
+        to_matrix(train_rows, cols), train_rows.label.to_numpy(), _groups(train_rows),
+        to_matrix(val_rows, cols), val_rows.label.to_numpy(), _groups(val_rows),
+        cols, split.seed,
     )
     best = booster.best_score["validation"]
     log.info("ranker best iteration %d, validation %s", booster.best_iteration, dict(best))
 
     final_als = candidates.fit(events[events.timestamp < split.validation_end], split.seed)
-    metrics = evaluate.run(events, final_als, booster, store, split.validation_end, split.candidates_k, split.eval_k)
+    metrics = evaluate.run(events, final_als, booster, store, split.validation_end, split.candidates_k, split.eval_k, fs)
     metrics.update({f"val_{k.replace('@', '_at_')}": v for k, v in best.items()})
     metrics.update({"ranker_best_iteration": booster.best_iteration, "train_rows": len(train_rows), "val_rows": len(val_rows),
                     "train_queries": float(len(_groups(train_rows))), "train_positive_rate": float(train_rows.label.mean())})
 
     tracking.setup()
-    with mlflow.start_run(run_name="two-stage") as run:
+    variant = variant_name(fs.name, anchor_mode)
+    with mlflow.start_run(run_name=f"two-stage-{variant}") as run:
         mlflow.log_params({f"split.{k}": v for k, v in split.model_dump(mode="json").items()})
         mlflow.log_params({f"als.{k}": v for k, v in candidates.ALS_PARAMS.items()})
         mlflow.log_params({f"ranker.{k}": v for k, v in ranker.RANKER_PARAMS.items()})
+        mlflow.log_params({"feature_set": fs.name, "anchor_mode": anchor_mode})
         mlflow.log_metrics(metrics)
-        mlflow.set_tags({"feast.feature_refs": ",".join(FEATURE_REFS), "phase": "1"})
-        importance = dict(zip(MODEL_FEATURES, booster.feature_importance("gain").round(1).tolist()))
+        mlflow.set_tags({"feast.feature_refs": ",".join(fs.refs), "feature_set": fs.name, "variant": variant, "phase": "2"})
+        importance = dict(zip(cols, booster.feature_importance("gain").round(1).tolist()))
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             final_als.save(d / "als.npz")
             ranker.save(booster, d / "ranker.txt")
             manifest = {
-                "feature_refs": FEATURE_REFS,
-                "model_features": MODEL_FEATURES,
+                "feature_set": fs.name,
+                "anchor_mode": anchor_mode,
+                "variant": variant,
+                "feature_refs": fs.refs,
+                "model_features": cols,
                 "serving_as_of": split.validation_end.isoformat(),
                 "candidates_k": split.candidates_k,
                 "top_n": split.top_n,
@@ -113,8 +135,18 @@ def main() -> None:
         run_id = run.info.run_id
 
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    LATEST_RUN.write_text(run_id)
-    log.info("MLflow run %s", run_id)
+    run_id_file(variant).write_text(run_id)
+    return run_id, metrics
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--feature-set", default="batch", choices=sorted(FEATURE_SETS))
+    ap.add_argument("--anchors", default="weekly", choices=["weekly", "session"])
+    args = ap.parse_args()
+    run_id, metrics = train(FEATURE_SETS[args.feature_set], args.anchors)
+    log.info("MLflow run %s (variant %s)", run_id, variant_name(args.feature_set, args.anchors))
     for k, v in sorted(metrics.items()):
         log.info("  %-40s %s", k, round(v, 4) if isinstance(v, float) else v)
 

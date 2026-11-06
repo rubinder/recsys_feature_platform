@@ -135,3 +135,68 @@ trains both stages (logged to MLflow), starts the API and prints ranked recs for
 a sample user. `make test` passes. README and docs explain online/offline
 consistency, point-in-time correctness and the two-stage design, with measured
 latency and offline metrics.
+
+---
+
+## Phase 2: Streaming features, feature cache, impression logging, rec metrics
+
+### Goal
+
+Make user features fresh in near-real-time and close the measurement loop: log
+what the system shows, attribute (simulated) clicks, and compute rec quality.
+
+### Architecture
+
+```
+events (test period, after validation_end)
+   │ producer: pydantic contract, seq numbers, speed-up (default 1 day/s)
+   ▼
+Kafka `interactions` ──> PyFlink job (JobManager + TaskManager in docker-compose)
+                          parse + validate ──invalid/late──> Kafka `interactions-dlq`
+                          keyBy(user) KeyedProcessFunction (event time, watermarks)
+                          UserStreamState (shared pure-Python logic)
+                          │ history events: update state only
+                          │ replay events : push to Feast feature server
+                          ▼
+                Feast feature server /push
+                 ├─ online  (per event)  ──> Redis
+                 └─ offline (batched)    ──> data/offline/user_stream.parquet
+```
+
+### Key decisions (ADRs)
+
+| Decision | Choice | Why |
+|---|---|---|
+| Write path | Flink pushes through Feast's feature server (`/push`), online per event, offline in batches | Same feature definition for training and serving; never write Redis keys directly. Feast's file offline store rewrites the Parquet file on append, so offline writes are batched. |
+| One transformation, two runners | `UserStreamState` is pure Python. Flink wraps it for live events; a bounded backfill runs it over history to build the offline table | Training and serving features come from identical code (Kappa-style). A parity check compares them. |
+| State bootstrap | Flink replays all history before the replay window, updating state without pushing, then pushes from validation_end on | A Flink job starting empty would compute different session / rolling / last-N values than training saw. |
+| Streaming features | session events + duration, last 10 items, rolling 1h/24h counts, gap since previous event, last event time | As specified. Derived at request time (shared code): seconds since last event, and `recent_item_sim` = similarity of each candidate to the last-N items in ALS space, the session-aware feature that makes freshness matter. |
+| Feature cache | In-process TTL cache for **item** features (batch, slow-changing); user features always fetched fresh | Caching what changes slowly cuts the 200-row online read to a 1-row read. Cache hit/miss counted next to the latency histogram. |
+| Deterministic simulation | Lockstep simulator: at each session start it waits until Flink has processed every earlier event (progress key in Redis), requests recommendations, then produces the event | Results don't depend on timing, so `make metrics` and Phase 4 benchmarks are reproducible. `demo-streaming` also shows the free-running live path. |
+| Variants | API serves several models by variant name; the simulator requests every variant at each session start and logs each impression with its variant | Counterfactual replay: both variants face identical state and identical future behaviour. Phase 5 adds per-user assignment. |
+| Click attribution | A replayed interaction by the same user with a shown item within 24h (event time) after the impression is a click | Outcomes are simulated, not real feedback. Every report says so. |
+| Log store | Parquet partitioned by date under `data/logs/{impressions,interactions}`, queried with DuckDB; pydantic contracts with `schema_version`, `experiment_id`, `variant` | As specified; variant fields exist now so Phase 5 needs no contract change. |
+
+### Make targets
+
+`stream-up`, `stream-reset`, `backfill-streaming`, `flink-features`, `produce`,
+`simulate`, `metrics`, `stream-parity`, `demo-streaming`, plus `train` with
+`STREAMING=1`.
+
+### Docs and presentation (Phase 2)
+
+`docs/phase-2.md`; ADRs for the decisions above; captured Redis freshness,
+Flink UI, cache hit rates and the metrics report; README diagram updated.
+
+### Status
+
+Done. See [docs/phase-2.md](docs/phase-2.md). Changes from this plan made during
+implementation: offline streaming writes are append-only parts rather than
+Feast's file-store offline push (ADR 0007); session-anchored training added
+(ADR 0010); PyFlink runs in thread mode; Flink drops duplicate `seq`s.
+
+### Out of scope
+
+Dagster, data quality frameworks, Terraform/AWS/Snowflake (Phase 3);
+benchmarks and confidence intervals (Phase 4); registry, A/B assignment,
+significance tests, monitoring (Phase 5).

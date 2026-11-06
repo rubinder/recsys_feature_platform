@@ -1,16 +1,21 @@
-"""Feature references and model inputs, shared by training and serving.
+"""Feature sets and model inputs, shared by training and serving.
 
-Both paths import these constants and `to_matrix`, so the ranker always sees
-the same columns in the same order. That shared code is half of the
-train/serve consistency story; Feast's shared definitions are the other half.
+Both paths import these definitions and `to_matrix`, so a ranker always sees the
+same columns in the same order. That shared code is half of the train/serve
+consistency story; Feast's shared definitions are the other half.
+
+A model is trained on one FeatureSet; its name is stored in the MLflow manifest
+and the serving layer uses the same set for that model.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
-FEATURE_REFS: list[str] = [
+BATCH_REFS: list[str] = [
     "user_stats:user_interaction_count",
     "user_stats:user_interaction_count_30d",
     "user_stats:user_avg_weight",
@@ -23,6 +28,52 @@ FEATURE_REFS: list[str] = [
     "item_stats:item_days_since_first",
     "user_item_affinity:genre_affinity",
 ]
+STREAM_REFS: list[str] = [
+    "user_stream:stream_session_events",
+    "user_stream:stream_session_duration_s",
+    "user_stream:stream_last_items",
+    "user_stream:stream_count_1h",
+    "user_stream:stream_count_24h",
+    "user_stream:stream_gap_s",
+    "user_stream:stream_last_event_ts",
+]
+# Item-keyed refs: batch-computed, slow-changing, safe to cache at serving time.
+ITEM_REFS: list[str] = [r for r in BATCH_REFS if r.startswith(("item_popularity:", "item_stats:"))] + [
+    "item_stats:item_genre_vector"
+]
+# Derived at request/anchor time from streaming features (recsys.features.derived).
+DERIVED_STREAM: list[str] = ["stream_secs_since_last", "stream_in_session", "recent_item_sim"]
+
+# Backwards-compatible names (Phase 1 code and tests).
+FEATURE_REFS = BATCH_REFS
+
+
+def _names(refs: list[str]) -> list[str]:
+    return [r.split(":")[1] for r in refs]
+
+
+@dataclass(frozen=True)
+class FeatureSet:
+    name: str
+    refs: list[str]
+    model_features: list[str]
+
+    @property
+    def uses_stream(self) -> bool:
+        return any(r.startswith("user_stream:") for r in self.refs)
+
+
+BATCH = FeatureSet("batch", BATCH_REFS, _names(BATCH_REFS) + ["als_score"])
+STREAMING = FeatureSet(
+    "streaming",
+    BATCH_REFS + STREAM_REFS,
+    _names(BATCH_REFS)
+    + ["stream_session_events", "stream_session_duration_s", "stream_count_1h", "stream_count_24h"]
+    + DERIVED_STREAM
+    + ["als_score"],
+)
+FEATURE_SETS = {fs.name: fs for fs in (BATCH, STREAMING)}
+MODEL_FEATURES = BATCH.model_features
 
 # Feature groups for ablation (Phase 4). Values are model-input column names.
 GROUPS: dict[str, list[str]] = {
@@ -36,10 +87,10 @@ GROUPS: dict[str, list[str]] = {
     "popularity": ["item_interaction_count", "item_interaction_count_30d"],
     "item_quality_recency": ["item_avg_weight", "item_days_since_last", "item_days_since_first"],
     "affinity": ["genre_affinity"],
+    "session": ["stream_session_events", "stream_session_duration_s", "stream_count_1h", "stream_count_24h"]
+    + DERIVED_STREAM,
     "collaborative": ["als_score"],
 }
-
-MODEL_FEATURES: list[str] = [ref.split(":")[1] for ref in FEATURE_REFS] + ["als_score"]
 
 
 def to_matrix(df: pd.DataFrame, columns: list[str] = MODEL_FEATURES) -> np.ndarray:

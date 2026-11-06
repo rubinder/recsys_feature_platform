@@ -15,7 +15,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     split = load_split()
     end = split.validation_end
-    start = end - timedelta(days=30)
+    # Must cover the longest feature-view TTL so every entity that the offline
+    # store returns at `end` is also loaded online (user_stream ttl = 365 days).
+    start = end - timedelta(days=365)
     store = get_store()
     store.materialize(start_date=start, end_date=end + timedelta(seconds=1))
     log.info("materialized features as of %s into Redis", end.isoformat())

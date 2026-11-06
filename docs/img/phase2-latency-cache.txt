@@ -1,0 +1,12 @@
+500 requests per run, warm users, seeded sample, params {'cache': 'true', 'variant': 'streaming_session'}
+concurrency   p50 ms   p95 ms   p99 ms    req/s errors
+          1     6.24     8.35    12.15    151.9      0
+          8    39.87    57.57    82.83    197.1      0
+
+item-feature cache (concurrency 1 run): hit rate 97.8% (102690 hits / 2310 misses, ttl 300s)
+
+server-side stages (concurrency 1):
+  candidates       p50    0.08 ms   p95    0.11 ms   p99    0.12 ms
+  online_features  p50    2.07 ms   p95    3.43 ms   p99    5.65 ms
+  ranking          p50    1.97 ms   p95    2.59 ms   p99    3.89 ms
+  total            p50    4.12 ms   p95    6.01 ms   p99    9.71 ms
