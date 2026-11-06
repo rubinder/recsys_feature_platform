@@ -15,7 +15,8 @@ from feast import FeatureStore
 
 from recsys import scoring
 from recsys.eval.metrics import evaluate
-from recsys.features.features import FEATURE_REFS
+from recsys.features.derived import add_stream_derived
+from recsys.features.features import BATCH, FeatureSet
 from recsys.training import candidates
 from recsys.training.candidates import ALSModel
 
@@ -37,10 +38,10 @@ def candidate_frame(model: ALSModel, users: list[int], t: datetime, k: int) -> p
     return df
 
 
-def with_features(store: FeatureStore, rows: pd.DataFrame) -> pd.DataFrame:
+def with_features(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet = BATCH) -> pd.DataFrame:
     """Point-in-time join, merged back on keys (Feast does not preserve row order)."""
     keys = ["user_id", "item_id", "event_timestamp"]
-    feats = store.get_historical_features(entity_df=rows[keys], features=FEATURE_REFS).to_df()
+    feats = store.get_historical_features(entity_df=rows[keys], features=fs.refs).to_df()
     feats["event_timestamp"] = pd.to_datetime(feats["event_timestamp"], utc=True)
     rows = rows.assign(event_timestamp=pd.to_datetime(rows["event_timestamp"], utc=True))
     out = rows.merge(feats, on=keys, how="left", validate="one_to_one")
@@ -49,13 +50,22 @@ def with_features(store: FeatureStore, rows: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def prepare(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet, als: ALSModel, t: datetime | None) -> pd.DataFrame:
+    """Feature join plus request-time derived features (t=None: per-row event_timestamp)."""
+    rows = with_features(store, rows, fs)
+    if not fs.uses_stream:
+        return rows
+    return add_stream_derived(rows, als, None if t is None else pd.Timestamp(t))
+
+
 def run(
-    events: pd.DataFrame, model: ALSModel, booster: lgb.Booster, store: FeatureStore, t: datetime, k: int, ks: list[int]
+    events: pd.DataFrame, model: ALSModel, booster: lgb.Booster, store: FeatureStore, t: datetime, k: int, ks: list[int],
+    fs: FeatureSet = BATCH,
 ) -> dict[str, float]:
     truth = ground_truth(events, t)
     users = sorted(u for u in truth if u in model.uidx)
-    rows = with_features(store, candidate_frame(model, users, t, k))
-    rows["ranker_score"] = scoring.score(booster, rows)
+    rows = prepare(store, candidate_frame(model, users, t, k), fs, model, t)
+    rows["ranker_score"] = scoring.score(booster, rows, fs.model_features)
 
     def ranked(col: str) -> dict[int, list[int]]:
         ordered = rows.sort_values(["user_id", col, "item_id"], ascending=[True, False, True])

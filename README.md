@@ -8,9 +8,10 @@ model sees the same feature values in both places.
 The data infrastructure is the deliverable; the models (implicit ALS +
 LightGBM LambdaRank) are off-the-shelf.
 
-> **Status: Phase 1 of 5.** Core feature platform. Streaming features, impression
-> logging, orchestration, cloud infrastructure, benchmarks, and the production
-> loop follow in later phases (see [PLAN.md](PLAN.md)).
+> **Status: Phase 2 of 5.** Core feature platform (Phase 1) plus streaming
+> features, a feature cache, impression logging and rec-quality metrics (Phase 2).
+> Orchestration and cloud infrastructure, benchmarks, and the production loop
+> follow (see [PLAN.md](PLAN.md)).
 
 ## Architecture
 
@@ -18,29 +19,42 @@ LightGBM LambdaRank) are off-the-shelf.
 flowchart LR
   classDef new fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
 
-  ML[(MovieLens 1M)] --> ING[Ingest<br/>generic schema]:::new
-  ING --> RAW[(data/raw<br/>events · items · users)]:::new
-  RAW --> SPARK[PySpark<br/>weekly feature snapshots]:::new
-  SPARK --> OFF[(Offline store<br/>Parquet via DuckDB)]:::new
+  ML[(MovieLens 1M)] --> ING[Ingest<br/>generic schema]
+  ING --> RAW[(data/raw<br/>events · items · users)]
+  RAW --> SPARK[PySpark<br/>weekly feature snapshots]
+  SPARK --> OFF[(Offline store<br/>Parquet via DuckDB)]
+  RAW --> BF[Streaming backfill<br/>same logic as Flink]:::new
+  BF --> OFF
+
+  RAW --> PROD[Producer / simulator<br/>replay, contract, seq]:::new
+  PROD --> KAFKA[(Kafka<br/>interactions)]:::new
+  KAFKA --> FLINK[PyFlink job<br/>event time · keyed state]:::new
+  FLINK -->|invalid / late| DLQ[(Kafka DLQ)]:::new
+  FLINK -->|push online| FS[Feast feature server]:::new
+  FLINK -->|append-only parts| OFF
 
   subgraph FEAST[Feast: one set of feature definitions]
-    DEF[Entities · feature views<br/>on-demand genre affinity]:::new
+    DEF[Batch views · streaming push view<br/>on-demand genre affinity]
   end
   OFF --- DEF
-  DEF -->|materialize| REDIS[(Online store<br/>Redis)]:::new
+  DEF -->|materialize| REDIS[(Online store<br/>Redis)]
+  FS --> REDIS
 
-  RAW --> LBL[Anchors + 7-day labels]:::new
-  LBL --> PIT[get_historical_features<br/>point-in-time join]:::new
+  RAW --> LBL[Weekly + session anchors<br/>7-day labels]
+  LBL --> PIT[get_historical_features<br/>point-in-time join]
   DEF --> PIT
-  PIT --> TRAIN[ALS candidates +<br/>LightGBM LambdaRank]:::new
-  TRAIN --> MLF[(MLflow<br/>runs + artifacts)]:::new
+  PIT --> TRAIN[ALS candidates +<br/>LightGBM LambdaRank]
+  TRAIN --> MLF[(MLflow<br/>runs + artifacts)]
 
-  MLF -->|load by run id| API[FastAPI<br/>/recommendations/user_id]:::new
-  REDIS -->|get_online_features| API
-  API --> LAT[Per-stage latency<br/>histogram]:::new
+  MLF -->|variants by run id| API[FastAPI<br/>/recommendations/user_id]
+  REDIS -->|user features fresh,<br/>item features cached| API
+  API --> IMP[(Impression log<br/>contract, Parquet)]:::new
+  PROD --> INT[(Interaction log)]:::new
+  IMP --> MET[Rec metrics<br/>CTR · NDCG · coverage]:::new
+  INT --> MET
 ```
 
-Blue = added in this phase (all of it, for Phase 1).
+Blue = added in Phase 2 (streaming, logging, measurement). Everything else is Phase 1.
 
 ## How online/offline consistency works
 
@@ -78,7 +92,9 @@ strictly before its timestamp, which a test checks), and Feast's
 before its anchor time. ALS candidates for each anchor come from an ALS model fit
 only on events before that anchor.
 
-## Results (Phase 1)
+## Results
+
+### Phase 1: feature store + two-stage ranking
 
 Measured on the fixed test period (after 2000-12-29), 1,176 users. Details in
 [docs/phase-1.md](docs/phase-1.md).
@@ -97,6 +113,26 @@ Measured on the fixed test period (after 2000-12-29), 1,176 users. Details in
 - **Reproducible:** two clean `make demo` runs gave identical metrics and
   recommendations.
 
+### Phase 2: streaming features and the measurement loop
+
+28-day replay of the test period, 3,054 request points served by both variants.
+Outcomes are **simulated** (counterfactual replay: a click is a replayed
+interaction with a shown item within 24 h). Details in [docs/phase-2.md](docs/phase-2.md).
+
+| | batch features | batch + streaming features |
+|---|---:|---:|
+| CTR | 0.396 | **0.446** (+12.6%) |
+| NDCG@10 | 0.098 | **0.110** (+11.9%) |
+| Catalog coverage | 8.2% | **21.9%** (×2.7) |
+
+- **Freshness:** about 100 ms from event to updated feature in Redis (Kafka →
+  PyFlink → Feast push).
+- **Streaming parity:** Flink's Redis values, the offline store and the shared
+  logic recomputed from events agree for 300 users × 7 features (0 mismatches).
+- **Item-feature cache:** p50 20.7 → **6.2 ms**, throughput 43 → **197 req/s** at
+  concurrency 8, 97.8% hit rate.
+- **Contracts:** 6/6 injected malformed events rejected to a dead-letter topic.
+
 ## Run it
 
 Prerequisites: Docker (running), Java 17+ (for PySpark), [uv](https://docs.astral.sh/uv/),
@@ -109,6 +145,19 @@ make test        # unit tests + integration tests (integration needs the pipelin
 ```
 
 Individual steps: `make setup data features materialize parity train serve`.
+
+Streaming (Phase 2), after `make demo`:
+
+```bash
+make train-streaming   # session-anchored rankers: batch-only vs batch + streaming features
+make demo-streaming    # Kafka + Flink + feature server; live replay with DLQ; 28-day
+                       # deterministic simulation; metrics report; streaming parity
+make metrics           # rec-quality report from the impression/interaction logs
+make produce DAYS=3 SPEEDUP=43200 MALFORMED=5   # free-running live replay
+```
+
+Flink dashboard: http://localhost:8081. Kafka, Flink and the Feast feature server
+run under the docker-compose `stream` profile (`make stream-up` / `stream-down`).
 `make docs-capture` regenerates the screenshots and captured output in `docs/img/`.
 
 The API runs on `http://localhost:8000`:
@@ -121,6 +170,7 @@ curl localhost:8000/latency                     # server-side p50/p95/p99 per st
 ## Docs
 
 - [Phase 1 write-up](docs/phase-1.md): what was built, decisions, measured results, limitations
+- [Phase 2 write-up](docs/phase-2.md): streaming features, cache, logging, metrics, and the bugs found on the way
 - [Decision records](docs/decisions/)
 - [Captured output and screenshots](docs/img/)
 - [PLAN.md](PLAN.md): the five-phase plan

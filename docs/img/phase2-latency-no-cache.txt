@@ -1,0 +1,10 @@
+500 requests per run, warm users, seeded sample, params {'cache': 'false', 'variant': 'streaming_session'}
+concurrency   p50 ms   p95 ms   p99 ms    req/s errors
+          1    20.71    24.16    28.42     45.3      0
+          8   178.88   262.71   306.64     42.9      0
+
+server-side stages (concurrency 1):
+  candidates       p50    0.09 ms   p95    0.13 ms   p99    0.19 ms
+  online_features  p50   16.08 ms   p95   18.41 ms   p99   23.08 ms
+  ranking          p50    2.03 ms   p95    2.47 ms   p99    2.86 ms
+  total            p50   18.20 ms   p95   20.93 ms   p99   25.58 ms

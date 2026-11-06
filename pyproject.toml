@@ -17,6 +17,8 @@ dependencies = [
   "pydantic>=2",
   "scipy",
   "numpy",
+  "confluent-kafka==2.16.1",
+  "redis>=7.4.1",
 ]
 
 [dependency-groups]

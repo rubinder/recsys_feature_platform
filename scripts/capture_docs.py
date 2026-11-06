@@ -1,8 +1,10 @@
-"""Reproducible doc artifacts for docs/img/ (run with `make docs-capture`).
+"""Reproducible doc artifacts for docs/img/ (run with `make docs-capture PHASE=N`).
 
-Requires the API running on :8000 (`make serve`). Starts a temporary MLflow UI,
-screenshots the latest training run with Playwright, and saves the sample API
-response, demo output, latency report, and parity check as text.
+Phase 1 (needs `make serve`): MLflow run screenshots, sample API response, demo
+output, latency report, parity check.
+Phase 2 (needs `make demo-streaming` to have run, stack up): Flink job graph
+screenshot, metrics report, streaming parity, latency with and without the
+item-feature cache, and the live freshness demo output.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import httpx
 from recsys.config import ARTIFACTS, MLRUNS, ROOT
 
 IMG = ROOT / "docs" / "img"
-PHASE = "phase1"
+PHASE = "phase" + (sys.argv[1] if len(sys.argv) > 1 else "1")
 
 
 def run(cmd: list[str]) -> str:
@@ -63,8 +65,33 @@ def mlflow_screenshot() -> None:
         ui.terminate()
 
 
+def phase2() -> None:
+    from playwright.sync_api import sync_playwright
+
+    out = lambda name, cmd: (IMG / f"phase2-{name}").write_text(run(cmd))  # noqa: E731
+    py = sys.executable
+    out("metrics-report.txt", [py, "-m", "recsys.eval.report"])
+    (IMG / "phase2-stream-parity.txt").write_text(
+        run([py, "-m", "recsys.features.parity"]) + "\n" + run([py, "-m", "recsys.streaming.parity"]))
+    out("latency-no-cache.txt", [py, "-m", "recsys.latency.loadgen", "--variant", "streaming_session", "--no-cache",
+                                 "--out", "latency_no_cache.json"])
+    out("latency-cache.txt", [py, "-m", "recsys.latency.loadgen", "--variant", "streaming_session",
+                              "--out", "latency_cache.json"])
+    with sync_playwright() as p:
+        page = p.chromium.launch().new_page(viewport={"width": 1440, "height": 900})
+        jobs = httpx.get("http://localhost:8081/jobs/overview").json()["jobs"]
+        jid = next(j["jid"] for j in jobs if j["state"] == "RUNNING")
+        page.goto(f"http://localhost:8081/#/job/running/{jid}/overview")
+        page.wait_for_timeout(4000)
+        page.screenshot(path=str(IMG / "phase2-flink-job.png"))
+
+
 if __name__ == "__main__":
     IMG.mkdir(parents=True, exist_ok=True)
+    if PHASE == "phase2":
+        phase2()
+        print(f"wrote {sorted(p.name for p in IMG.glob('phase2-*'))}")
+        sys.exit(0)
     text_artifacts()
     mlflow_screenshot()
     print(f"wrote {sorted(p.name for p in IMG.glob(PHASE + '-*'))}")

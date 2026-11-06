@@ -41,7 +41,7 @@ def test_labels_use_only_future_unseen_items():
     rows = [(u, i, 5.0, "2000-01-01") for u in range(1, 6) for i in range(1, 6) if (u + i) % 2]
     rows += [(1, 2, 5.0, "2000-01-12"), (1, 1, 5.0, "2000-01-12")]  # item 1 was not seen by user 1 before t
     ev = _events(rows)
-    out, stats = labels.build_rows(ev, t, t + timedelta(days=7), k=10, seed=0)
+    out, stats, _ = labels.build_rows(ev, t, t + timedelta(days=7), k=10, seed=0)
     pos = set(out[out.label == 1].item_id)
     seen_before = set(ev[(ev.user_id == 1) & (ev.timestamp < t)].item_id)
     assert pos and not (pos & seen_before)

@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
-from feast import Entity, FeatureView, Field, FileSource, ValueType
+from feast import Entity, FeatureView, Field, FileSource, PushSource, ValueType
 from feast.on_demand_feature_view import on_demand_feature_view
 from feast.types import Array, Float32, Float64, Int64
 
@@ -103,4 +103,37 @@ def user_item_affinity(inputs: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-OBJECTS = [user, item, user_stats, user_genre_affinity, item_popularity, item_stats, user_item_affinity]
+# Streaming user features (Phase 2). Flink pushes live rows through the feature
+# server to both stores; the batch source is the bounded backfill of the same
+# logic plus every row pushed offline since.
+# Batch source is a directory of append-only Parquet parts: the backfill plus the
+# parts Flink writes for replayed events (see ADR 0007 for why not Feast's
+# file-store offline push, which rewrites the whole file on every append).
+user_stream_push = PushSource(
+    name="user_stream_push",
+    batch_source=FileSource(
+        name="user_stream_source", path=str(OFFLINE / "user_stream" / "*.parquet"), timestamp_field="event_timestamp"
+    ),
+)
+
+user_stream = FeatureView(
+    name="user_stream",
+    entities=[user],
+    ttl=timedelta(days=365),
+    schema=[
+        Field(name="stream_session_events", dtype=Int64),
+        Field(name="stream_session_duration_s", dtype=Float64),
+        Field(name="stream_last_items", dtype=Array(Int64)),
+        Field(name="stream_count_1h", dtype=Int64),
+        Field(name="stream_count_24h", dtype=Int64),
+        Field(name="stream_gap_s", dtype=Float64),
+        Field(name="stream_last_event_ts", dtype=Int64),
+    ],
+    source=user_stream_push,
+    tags={"group": "session"},
+)
+
+OBJECTS = [
+    user, item, user_stats, user_genre_affinity, item_popularity, item_stats, user_item_affinity,
+    user_stream_push, user_stream,
+]

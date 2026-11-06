@@ -1,13 +1,16 @@
-# Run from the repo root. MLflow records absolute artifact paths, so mlruns/ is
-# mounted at the same absolute path inside the container (${PWD}/mlruns).
+# Run from the repo root. MLflow and Feast record absolute host paths (artifacts,
+# offline Parquet files), so mlruns/ and data/ are also mounted at the same
+# absolute path inside containers that need them (${PWD}/...).
+# All ports bind to loopback only: nothing here has auth in local mode.
 services:
   redis:
     image: redis:7.4-alpine
-    ports: ["127.0.0.1:6379:6379"]  # loopback only: Redis has no auth locally
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       retries: 15
+
   app:
     build: .
     depends_on:
@@ -15,7 +18,10 @@ services:
     environment:
       REDIS_CONNECTION: redis:6379
       MLFLOW_TRACKING_URI: sqlite:///${PWD}/mlruns/mlflow.db
-      MODEL_RUN_ID: ${MODEL_RUN_ID:-}
+      MODEL_VARIANTS: ${MODEL_VARIANTS:-}
+      DEFAULT_VARIANT: ${DEFAULT_VARIANT:-batch}
+      FEATURE_CACHE: ${FEATURE_CACHE:-on}
+      FEATURE_CACHE_TTL_S: ${FEATURE_CACHE_TTL_S:-300}
     ports: ["127.0.0.1:8000:8000"]
     volumes:
       - ./data:/app/data
@@ -24,3 +30,77 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 3s
       retries: 40
+
+  # ---- streaming (Phase 2): `make stream-up` -------------------------------
+  kafka:
+    image: apache/kafka:4.1.0
+    profiles: [stream]
+    ports: ["127.0.0.1:9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: HOST://0.0.0.0:9092,DOCKER://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: HOST://127.0.0.1:9092,DOCKER://kafka:29092  # IPv4: port is bound to 127.0.0.1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: HOST:PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: DOCKER
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: -1
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 3s
+      retries: 40
+
+  feature-server:
+    build: .
+    profiles: [stream]
+    command: ["uvicorn", "recsys.streaming.feature_server:app", "--host", "0.0.0.0", "--port", "6566", "--no-access-log"]
+    depends_on:
+      redis: { condition: service_healthy }
+    environment:
+      REDIS_CONNECTION: redis:6379
+    ports: ["127.0.0.1:6566:6566"]
+    volumes:
+      - ./data:/app/data
+      - ./data:${PWD}/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6566/health')"]
+      interval: 3s
+      retries: 40
+
+  jobmanager:
+    build: { context: ., dockerfile: docker/flink.Dockerfile }
+    image: recsys-flink:2.2.1
+    profiles: [stream]
+    command: jobmanager
+    ports: ["127.0.0.1:8081:8081"]
+    environment: &flink-env
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        python.executable: /opt/pyflink/bin/python
+        python.client.executable: /opt/pyflink/bin/python
+        python.fn-execution.bundle.size: 1000
+        python.fn-execution.bundle.time: 5
+        python.execution-mode: thread
+        taskmanager.memory.process.size: 2048m
+      KAFKA_BOOTSTRAP: kafka:29092
+      FEATURE_SERVER_URL: http://feature-server:6566
+      REDIS_URL: redis://redis:6379/0
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/overview"]
+      interval: 3s
+      retries: 40
+
+  taskmanager:
+    image: recsys-flink:2.2.1
+    profiles: [stream]
+    command: taskmanager
+    depends_on: [jobmanager]
+    environment: *flink-env
+    volumes:
+      - ./data/offline/user_stream:/opt/recsys-data/user_stream

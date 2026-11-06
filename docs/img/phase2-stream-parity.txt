@@ -1,0 +1,7 @@
+online/offline parity: 200 (user, item) pairs x 11 features at serving time (batch features only: stream has been replayed, see `make stream-parity`)
+all features identical in Redis and the point-in-time offline store (>=50% non-null each)
+
+streaming parity: 300 replayed users x 7 features, 22417 replayed events (progress seq 920418)
+  Redis (Flink)        vs recomputed: 0 mismatches
+  offline parts (PIT)  vs recomputed: 0 mismatches
+  Flink output, Redis, the offline store and the shared logic all agree
