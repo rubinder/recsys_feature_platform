@@ -3,7 +3,7 @@
 services:
   redis:
     image: redis:7.4-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]  # loopback only: Redis has no auth locally
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
@@ -16,7 +16,7 @@ services:
       REDIS_CONNECTION: redis:6379
       MLFLOW_TRACKING_URI: sqlite:///${PWD}/mlruns/mlflow.db
       MODEL_RUN_ID: ${MODEL_RUN_ID:-}
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     volumes:
       - ./data:/app/data
       - ./mlruns:${PWD}/mlruns
