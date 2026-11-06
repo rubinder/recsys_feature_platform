@@ -1,0 +1,26 @@
+# Run from the repo root. MLflow records absolute artifact paths, so mlruns/ is
+# mounted at the same absolute path inside the container (${PWD}/mlruns).
+services:
+  redis:
+    image: redis:7.4-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 15
+  app:
+    build: .
+    depends_on:
+      redis: { condition: service_healthy }
+    environment:
+      REDIS_CONNECTION: redis:6379
+      MLFLOW_TRACKING_URI: sqlite:///${PWD}/mlruns/mlflow.db
+      MODEL_RUN_ID: ${MODEL_RUN_ID:-}
+    ports: ["8000:8000"]
+    volumes:
+      - ./data:/app/data
+      - ./mlruns:${PWD}/mlruns
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      retries: 40

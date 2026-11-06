@@ -1,0 +1,2 @@
+online/offline parity: 200 (user, item) pairs x 11 features at serving time
+all features identical in Redis and the point-in-time offline store

@@ -1,0 +1,97 @@
+This builds on the Phase 1 to 4 recommendation feature platform in this repo
+(Phase 5 of 5, the last phase; Phases 1 to 3 infrastructure plus the Phase 4
+benchmarks harness). First read the existing code, PLAN.md, README, and the
+benchmarks/ harness. Then build PHASE 5 only: the production loop
+(experimentation, continuous training, and monitoring). Keep a fully local,
+zero-cost default path.
+
+Add:
+1. Experimentation infrastructure. A deterministic experiment-assignment service
+   that hash-buckets users (salted by experiment_id) into control and treatment,
+   serves a different model variant per bucket through the existing serving
+   layer, and fills the experiment_id and variant fields that already exist in
+   the Phase 2 impression contract. Run experiments through the Phase 2 traffic
+   simulator. A lift-analysis module that builds on the Phase 4 comparison
+   module (deltas + confidence intervals) and adds significance tests (e.g. a
+   two-proportion test for CTR, a permutation or bootstrap test for NDCG@k), a
+   sample-ratio-mismatch check, and guardrail metrics (coverage and p99 latency).
+   Outcomes are simulated (Phase 2 attribution rule); the report must say so.
+   Expose it as `make experiment`.
+2. Model registry and retraining. MLflow tracking already exists from Phase 1;
+   add the MLflow model registry (local tracking server via docker-compose;
+   artifacts in the Phase 3 S3 bucket under the cloud profile, local otherwise).
+   A Dagster job and sensor that retrains on fresh data, plus a
+   champion/challenger promotion flow: register a challenger, compare it to the
+   champion on held-out metrics (via the Phase 4 comparison module) and the
+   Phase 3 data-quality checks, and promote or roll back using registry aliases.
+   Serving loads the current champion from the registry and reports its version
+   in responses and impression logs.
+3. Monitoring. Feature drift and prediction drift detection (for example PSI or
+   KL divergence against a reference window), and serving metrics (latency
+   p50/p99 from the existing histogram, QPS, error rate, cache hit rate)
+   exported to Prometheus with a Grafana dashboard via docker-compose. Alert
+   rules on drift, on a latency SLO breach, and on online feature freshness.
+4. Optional, behind a flag: containerized serving deployed to a local Kubernetes
+   (kind) with Helm, plus a short load test (Locust or k6) that validates the
+   serving latency SLO under concurrency.
+5. Optional, behind a second flag, real AWS: Terraform (reusing the Phase 3
+   modules and remote state) for ECR, an EKS cluster, and a load balancer, and
+   the same Helm chart deployed to EKS with serving reading the Phase 3
+   ElastiCache online store from inside the VPC. Document the hourly cost and
+   how MSK + Flink would run in-VPC. Never run apply or destroy yourself; give
+   me a destroy target.
+
+Stack notes:
+- Reuse everything from Phases 1 to 4. Do not rewrite working code.
+- Reuse the existing metrics and statistics code: the CTR/NDCG@k metrics from
+  Phases 1-2 and the comparison module from Phase 4. The A/B lift analysis must
+  build on those, not reimplement them.
+- MLflow, Prometheus, and Grafana run locally via docker-compose. The kind and
+  EKS pieces are optional and flag-gated so the default run needs no cluster
+  and no cloud account.
+- `make demo`, `make demo-streaming`, `make benchmarks`, and all existing tests
+  must keep passing.
+- Pin new dependencies; keep it deterministic and seeded.
+
+Out of scope: anything beyond the above.
+
+Documentation and presentation artifacts (part of the definition of done):
+- docs/phase-5.md: what this phase built and why, the key design decisions and
+  their tradeoffs, the measured results (real numbers from your run), and known
+  limitations or simplifications. Write it for an interviewer reading GitHub.
+- docs/decisions/: one short ADR per significant decision (context, options
+  considered, decision, consequences). For this phase at least: hash-based assignment and salting, the significance tests and guardrails, champion/challenger promotion gates and rollback, drift metric and thresholds, the optional kind/EKS deployment paths.
+- docs/img/: committed screenshots or captured output for this phase, taken with a
+  reproducible script (Playwright for web UIs, saved text/SVG for terminal
+  output) rather than by hand: the lift report, the MLflow registry with a promoted model and a rollback, the Grafana dashboard, and a firing alert.
+- Update the mermaid architecture diagram in the README so it shows the system as
+  of this phase, with this phase's new components visually marked.
+- Keep the README a concise front page: what the project is, the current
+  architecture diagram, how to run it, headline results, and links to docs/.
+  Detail lives in docs/.
+- Final walkthrough, since this is the last phase:
+  - docs/walkthrough.md: a 10-minute demo script (commands to run, what the
+    viewer sees at each step, and what each step proves about the design).
+  - docs/overview.md: a one-page summary of the whole system across all five
+    phases (problem, architecture, key decisions, headline results, limitations).
+  - docs/talking-points.md: likely interviewer questions with concise answers,
+    each pointing to the code, ADR, or result that backs it.
+  - Make sure every earlier docs/phase-N.md and the README still match the final
+    code.
+  - Optionally, offer to publish the overview as a single shareable web page.
+
+Process: write an updated PLAN.md section for Phase 5 and summarize it before
+implementing, including the cost of the optional EKS path. Add Makefile targets:
+experiment, retrain, monitor-up (Prometheus + Grafana), and optional k8s-deploy,
+loadtest, eks-plan, eks-apply, eks-destroy. When done, run an experiment and a
+retrain/promote cycle yourself and show me the lift report, the MLflow registry
+with a promoted model, and the Grafana dashboard.
+
+Definition of done: an A/B experiment runs end to end and produces a lift report
+with confidence intervals, significance, and guardrails; MLflow shows versioned
+models with a metric-gated promote and rollback flow that serving respects; a
+Grafana dashboard shows serving latency, drift, and freshness with alert rules;
+the README explains the experimentation, retraining, and monitoring loop, and
+the optional kind/EKS deployment paths.
+The docs/ artifacts above are written, screenshots are captured, and the
+README diagram reflects this phase.
