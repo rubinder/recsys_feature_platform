@@ -1,0 +1,78 @@
+This builds on the Phase 1 to 3 recommendation feature platform in this repo
+(Phase 4 of 5; the order is strictly 1 -> 2 -> 3 -> 4 -> 5). First read the
+existing code, PLAN.md, and README. Then build the BENCHMARKS phase: a
+reproducible set of experiments that vary one knob at a time and measure the
+before/after, to demonstrate the tradeoffs behind the design.
+
+Build a benchmarks/ harness and a `make benchmarks` target that runs each
+experiment, writes a results row (config + metrics), and regenerates a results
+table and charts in the README. Reuse the existing CTR / hit-rate / NDCG@k /
+coverage metrics, the fixed Phase 1 evaluation split, the Phase 2 traffic
+simulator and feature cache, and the Phase 1 latency instrumentation. Log every
+benchmark run to MLflow (one MLflow experiment per benchmark). Every number must
+be really measured, deterministic, and seeded. CTR is simulated (Phase 2
+attribution rule) and must be labeled as such wherever it appears. Each
+experiment gets a one-sentence takeaway in the README explaining the mechanism.
+
+Build a reusable comparison module (e.g. benchmarks/compare.py) that takes two
+result sets and returns per-metric deltas with seeded bootstrap confidence
+intervals. Every experiment uses it, and Phase 5's A/B lift analysis will build
+on it, so give it a clean, typed API and tests.
+
+Experiments (one knob each, all on the two-stage system unless stated):
+1. Feature freshness: ranker with batch-only features vs batch + streaming
+   features. Measure simulated CTR, NDCG@k, and average feature staleness.
+2. Point-in-time correctness: training with Feast point-in-time retrieval vs a
+   naive "latest feature value" join. Report both and show the train/serve skew
+   or leakage the naive join introduces (offline metrics look better, test /
+   serving metrics get worse).
+3. Serving latency: p50/p99 and throughput with vs without the Phase 2
+   online-feature cache, and across feature-fetch batch sizes.
+4. Feature ablation: add or remove feature groups (popularity, recency,
+   affinity, session) and measure NDCG@k and coverage.
+(Optional, secondary: ALS-only vs two-stage, and a small ALS factors or
+candidate-K sweep. Keep it light; the focus is infrastructure tradeoffs, not
+model tuning.)
+
+Deliverables:
+- A benchmarks/ module with one runnable script or config per experiment, driven
+  by `make benchmarks`.
+- The comparison module with confidence intervals, plus tests.
+- A RESULTS section with a table per experiment and one or two committed
+  matplotlib charts, each with a one-sentence takeaway. Generated content goes
+  only between marker comments (<!-- BENCHMARKS:START --> /
+  <!-- BENCHMARKS:END -->) so the rest of the README is never overwritten.
+- Reproducible: pinned deps, fixed seeds, the fixed Phase 1 evaluation split so
+  runs are comparable. Benchmarks run on the local default path with no cloud
+  accounts.
+
+Out of scope: new infrastructure, A/B assignment, significance tests, the MLflow
+registry, and monitoring (Phase 5). Reuse what exists; this phase only adds the
+experiment harness, the comparison module, and the write-up. `make demo` and all
+existing tests must keep passing.
+
+Documentation and presentation artifacts (part of the definition of done):
+- docs/phase-4.md: what this phase built and why, the key design decisions and
+  their tradeoffs, the measured results (real numbers from your run), and known
+  limitations or simplifications. Write it for an interviewer reading GitHub.
+- docs/decisions/: one short ADR per significant decision (context, options
+  considered, decision, consequences). For this phase at least: benchmark methodology (one knob at a time, fixed split, seeds), bootstrap confidence intervals, how simulated CTR is interpreted.
+- docs/img/: committed screenshots or captured output for this phase, taken with a
+  reproducible script (Playwright for web UIs, saved text/SVG for terminal
+  output) rather than by hand: the committed benchmark charts and the MLflow benchmark experiments view.
+- Update the mermaid architecture diagram in the README so it shows the system as
+  of this phase, with this phase's new components visually marked.
+- Keep the README a concise front page: what the project is, the current
+  architecture diagram, how to run it, headline results, and links to docs/.
+  Detail lives in docs/.
+
+Process: write a PLAN.md section for the benchmarks phase and summarize it before
+implementing. When done, run `make benchmarks` yourself and show me the table and
+charts.
+
+Definition of done: `make benchmarks` reproduces every experiment end to end; the
+README shows a results table (with confidence intervals) and charts for each,
+each with a mechanistic one-line takeaway; the numbers are real and reproducible;
+the comparison module is tested and ready for Phase 5.
+The docs/ artifacts above are written, screenshots are captured, and the
+README diagram reflects this phase.

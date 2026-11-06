@@ -1,0 +1,133 @@
+I'm building a portfolio project that demonstrates data infrastructure for
+recommendations and personalization. The centerpiece is a feature store with
+online/offline consistency. I'm a senior/staff data engineer, so the data
+infrastructure is the deliverable and the models are off-the-shelf. The target
+reader is a data-infra interviewer at a company like Suno or Spotify.
+
+The project is built in five phases, strictly in this order. For context only
+(do NOT build Phases 2-5 now):
+  1. Core feature platform (this phase).
+  2. Streaming features, online-feature cache, impression logging, rec metrics.
+  3. Dagster orchestration, data quality, Terraform on real AWS + Snowflake.
+  4. Benchmarks harness.
+  5. A/B experimentation, MLflow registry + retraining, monitoring.
+Design Phase 1 so those can be added without rewrites.
+
+Build PHASE 1 ONLY. Scope it tightly.
+
+Goal: an end-to-end recommendation feature platform that runs locally, where the
+same feature definitions serve both model training (offline) and low-latency
+inference (online), with no train/serve skew.
+
+Stack:
+- Python 3.11+, dependencies pinned (uv or pip-tools lockfiles), fully
+  reproducible. Feast, PySpark, and later PyFlink/Dagster/MLflow have conflicting
+  pins, so separate virtualenvs or containers per component are allowed; keep
+  shared code in one importable package. List prerequisites (Docker, Java 17,
+  uv) in the README.
+- Feast as the feature store. Offline store: Parquet files read through Feast's
+  DuckDB offline store. Online store: Redis via Docker.
+- PySpark for batch feature computation, writing Parquet. Keep the dataset small
+  so local Spark is fine.
+- Dataset: MovieLens 1M, pulled by a script. Normalize it into a generic schema
+  so a music listening dataset can be swapped in later:
+    events(user_id, item_id, event_type, weight, timestamp)
+      MovieLens: event_type="rate", weight=rating. Music would be "play" with
+      weight=play count or listen fraction.
+    items(item_id, title, attributes) with genres/tags as item attributes.
+    users(user_id, optional attributes).
+- Models, two-stage, both off-the-shelf (do not hand-roll a model):
+    Stage 1, candidate generation: implicit ALS (the `implicit` library),
+    top-K candidates per user (K around 200).
+    Stage 2, ranking: LightGBM LambdaRank over the candidates, using Feast user
+    and item features plus the ALS score as inputs. This is what makes the
+    feature store matter: the ranker consumes the features at both training and
+    serving time.
+- MLflow tracking (local file store, no server needed): every training run logs
+  params, offline metrics, the Feast feature views and feature names used, the
+  data split boundaries, and both model artifacts. Serving loads models by MLflow
+  run id. The model registry is NOT part of this phase.
+- Serving: FastAPI + uvicorn. One endpoint: GET /recommendations/{user_id} that
+  reads the user's online features from Feast, generates ALS candidates, fetches
+  the candidates' item features from Feast in one batched online read, ranks
+  them, and returns top-N item ids with scores and the model_version (MLflow run
+  id).
+- Tests with pytest. Orchestrate with a Makefile and docker-compose.
+
+Phase 1 must include:
+1. A raw ingestion step that downloads the dataset into a raw/ layer and
+   normalizes it into the generic schema above.
+2. A fixed, time-based evaluation protocol defined once and reused by every later
+   phase: global timestamp cutoffs for train / validation / test, written to a
+   committed config file. No random splits.
+3. Batch feature computation in PySpark: user features (interaction count,
+   recency, average interaction weight, genre affinity) and item features
+   (popularity, average interaction weight, recency), each with an
+   event_timestamp so they can be joined point-in-time. Write to the offline
+   store.
+4. Feast definitions: user and item entities, feature views grouped so feature
+   groups can be ablated later (popularity, recency, affinity), offline + online
+   stores, and a materialize step that pushes features to Redis.
+5. Labels and point-in-time-correct training data. Build the ranker's training
+   set as rows of (user_id, item_id, event_timestamp, label), where label = 1 if
+   the user interacts with that candidate within a fixed window (e.g. 7 days)
+   after event_timestamp. Join features with Feast get_historical_features. The
+   README must explain why point-in-time correctness matters (no label leakage,
+   no train/serve skew).
+6. Offline evaluation on the test split: hit-rate@k and NDCG@k for ALS-only and
+   for the two-stage system, in a small reusable metrics module (Phase 2 extends
+   it), logged to MLflow.
+7. Latency instrumentation: per-stage timings (online feature fetch, candidate
+   generation, ranking, total) recorded in a reusable histogram, plus a small
+   `make latency` script that sends N requests and reports p50/p95/p99 and
+   throughput. Later phases benchmark and export these, so build it as a module,
+   not log lines.
+8. docker-compose (Redis + app) and a Makefile with: setup, data, features,
+   materialize, train, serve, latency, demo, test. `make demo` runs the whole
+   thing end to end on a fresh checkout and prints recommendations for a sample
+   user.
+9. A README with a mermaid architecture diagram, a clear explanation of how
+   online/offline consistency is achieved through shared Feast feature
+   definitions, the two-stage design, the evaluation protocol, how to run it, and
+   the measured serving latency.
+
+Explicitly OUT OF SCOPE for Phase 1 (do NOT build these, they come later):
+- Streaming features (Kafka, Flink) and any online-feature cache (Phase 2).
+- Impression/interaction logging, traffic simulation, CTR, coverage (Phase 2).
+- Dagster, data-quality frameworks, Terraform, AWS, Snowflake (Phase 3).
+- A benchmarks harness (Phase 4).
+- MLflow model registry, A/B assignment, drift monitoring, Prometheus/Grafana
+  (Phase 5).
+
+Documentation and presentation artifacts (part of the definition of done):
+- docs/phase-1.md: what this phase built and why, the key design decisions and
+  their tradeoffs, the measured results (real numbers from your run), and known
+  limitations or simplifications. Write it for an interviewer reading GitHub.
+- docs/decisions/: one short ADR per significant decision (context, options
+  considered, decision, consequences). For this phase at least: two-stage ALS + LightGBM ranking, the generic event/item schema, the time-based split and label window, DuckDB/Parquet offline store, MLflow tracking from day one.
+- docs/img/: committed screenshots or captured output for this phase, taken with a
+  reproducible script (Playwright for web UIs, saved text/SVG for terminal
+  output) rather than by hand: the MLflow run page, a sample /recommendations response, and the `make latency` report.
+- Update the mermaid architecture diagram in the README so it shows the system as
+  of this phase, with this phase's new components visually marked.
+- Keep the README a concise front page: what the project is, the current
+  architecture diagram, how to run it, headline results, and links to docs/.
+  Detail lives in docs/.
+- Set up the docs/ structure (docs/phase-N.md, docs/decisions/ with an ADR
+  template, docs/img/) so later phases follow it.
+
+Process:
+- First write PLAN.md and lay out the repo skeleton (directories, stub files, the
+  Makefile targets, docker-compose), and summarize the plan to me before
+  implementing. Then build it incrementally with small, typed, testable modules.
+- Pin dependencies, seed everything, keep it deterministic.
+- When done, run `make demo` and `make test` yourself, confirm they work end to
+  end, and show me the output, the offline metrics, and the serving latency.
+
+Definition of done: on a fresh checkout, `make demo` brings up Redis, builds
+features, materializes to the online store, trains both stages with runs logged
+to MLflow, starts the API, and returns ranked recommendations for a sample user;
+`make test` passes; the README explains the online/offline consistency story,
+point-in-time correctness, and the two-stage design, with measured latency.
+The docs/ artifacts above are written, screenshots are captured, and the
+README diagram reflects this phase.

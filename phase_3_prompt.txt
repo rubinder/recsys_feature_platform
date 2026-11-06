@@ -1,0 +1,100 @@
+This builds on the Phase 1 and Phase 2 recommendation feature platform in this
+repo (Phase 3 of 5; the order is strictly 1 -> 2 -> 3 -> 4 -> 5). First read the
+existing code, PLAN.md, and README. Then build PHASE 3 only: production-grade
+orchestration, infrastructure as code, and reliability. Phases 4 (benchmarks) and
+5 (experimentation, registry, monitoring) come later; do not build them.
+
+Add:
+1. Dagster orchestration. Model the batch path as Dagster assets: raw ingest ->
+   batch features -> Feast materialize -> train (both stages, logged to MLflow)
+   -> offline metrics. Model the Phase 2 impression/interaction logs as an
+   external/source asset produced by the simulator, with a downstream log-metrics
+   asset, so it is explicit where that data comes from. The Kafka/Flink streaming
+   job stays long-running outside Dagster; document that boundary and cover it
+   with the freshness check below. Add a schedule and a sensor (for example, run
+   on new raw data), and asset checks for data quality and feature freshness.
+   The Dagster UI should show the asset graph as lineage. This replaces the
+   ad-hoc Makefile sequencing for the batch side; keep the Makefile as thin
+   wrappers.
+2. Data quality and freshness. Add feature-level checks with Pandera wired in as
+   Dagster asset checks (value ranges, null rates, referential integrity between
+   users, items, and features), and a freshness SLA check on the online features
+   (batch and streaming) with a clear failure signal. Add retries so transient
+   failures recover automatically.
+3. Infrastructure as code with Terraform, applied to my real AWS and Snowflake
+   accounts. Define: S3 (offline store / data lake, plus an MLflow artifact
+   bucket), Snowflake (database, schema, warehouse, role, user, and S3 storage
+   integration + external stage), a streaming resource (MSK, to match the local
+   Kafka + Flink path), ElastiCache Redis, and IAM (least privilege, Snowflake
+   storage-integration role).
+   - Remote state in S3 with DynamoDB locking, bootstrapped by a small separate
+     root module. Separate modules for aws/ and snowflake/.
+   - Credentials come only from my environment (AWS profile/SSO; Snowflake
+     key-pair auth via env vars). Never commit secrets, keys, or account ids; add
+     a .env.example and .gitignore entries.
+   - Cost controls: smallest viable sizes, Snowflake XS warehouse with 60s
+     auto-suspend and a resource monitor, an AWS Budget alarm, cost-allocation
+     tags on everything, and a `make terraform-destroy` that tears it all down.
+     Put the always-on, expensive resources (MSK, ElastiCache) behind Terraform
+     variables that default to disabled, and document their hourly cost.
+   - MSK and ElastiCache live inside a VPC and are not reachable from my laptop.
+     Do not build new compute to reach them (no ECS/EKS/bastion in this phase;
+     an optional EKS deployment comes in Phase 5); the README must state that
+     the cloud online/streaming path would run in-VPC and the laptop path keeps
+     local Redis and Kafka.
+   - Document what maps to what (local component -> cloud resource).
+4. Snowflake offline store and S3 artifacts, for real. Make the Feast offline
+   store configurable (local Parquet/DuckDB vs Snowflake). With the cloud
+   profile, load the batch features into Snowflake (via the S3 stage), run
+   get_historical_features and materialize against Snowflake, and show it
+   produces the same training set as the local path. With the cloud profile,
+   MLflow logs artifacts to the S3 artifact bucket. The local default must still
+   run with no cloud accounts at all.
+
+Stack notes:
+- Reuse everything from Phases 1 and 2. Do not rewrite working code; wrap and
+  orchestrate it.
+- Keep a fully local, zero-cloud default path that still runs with `make demo`.
+  Cloud use is opt-in via an explicit profile/env var; nothing touches AWS or
+  Snowflake unless I select it.
+- `make demo`, `make demo-streaming`, and all existing tests must keep passing.
+- Pin new dependencies; keep it deterministic.
+
+Out of scope: anything beyond the above (in particular Phase 4 benchmarks,
+Phase 5 MLflow registry/experimentation/monitoring, and any cloud compute for
+serving).
+
+Documentation and presentation artifacts (part of the definition of done):
+- docs/phase-3.md: what this phase built and why, the key design decisions and
+  their tradeoffs, the measured results (real numbers from your run), and known
+  limitations or simplifications. Write it for an interviewer reading GitHub.
+- docs/decisions/: one short ADR per significant decision (context, options
+  considered, decision, consequences). For this phase at least: Dagster asset boundaries (batch in Dagster, streaming outside), Pandera for data quality, Terraform remote state and module layout, cost-gating MSK/ElastiCache, Snowflake loading via the S3 stage.
+- docs/img/: committed screenshots or captured output for this phase, taken with a
+  reproducible script (Playwright for web UIs, saved text/SVG for terminal
+  output) rather than by hand: the Dagster asset graph with passing checks, a failing freshness check (to show the failure signal), the `terraform plan` summary, and the local vs Snowflake training-set comparison.
+- Update the mermaid architecture diagram in the README so it shows the system as
+  of this phase, with this phase's new components visually marked.
+- Keep the README a concise front page: what the project is, the current
+  architecture diagram, how to run it, headline results, and links to docs/.
+  Detail lives in docs/.
+
+Process: write an updated PLAN.md section for Phase 3 and summarize it before
+implementing, including an estimated monthly cost with MSK/ElastiCache off and
+on. Add Makefile targets: dagster-dev (launch the UI), quality (run checks),
+terraform-bootstrap, terraform-plan, terraform-apply, terraform-destroy, and
+demo-snowflake. Never run terraform apply or destroy yourself: show me the plan
+and let me run apply. When done, run the Dagster job yourself, show me the asset
+graph with checks passing, show `terraform plan` output, and (after I apply) run
+demo-snowflake and show the local vs Snowflake training-set comparison.
+
+Definition of done: the Dagster UI shows the full asset lineage with schedules,
+sensors, and passing data-quality and freshness checks; Terraform plans and
+applies the AWS and Snowflake resources with remote state, cost controls, and a
+working destroy; the Feast offline store runs against real Snowflake and matches
+the local training set; MLflow artifacts go to S3 under the cloud profile; `make
+demo` still works with no cloud accounts; the README explains the production
+deployment story, local-to-cloud mapping, costs, the orchestration, and the
+reliability and observability mechanisms.
+The docs/ artifacts above are written, screenshots are captured, and the
+README diagram reflects this phase.

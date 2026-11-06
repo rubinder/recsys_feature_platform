@@ -1,0 +1,93 @@
+This builds on the Phase 1 recommendation feature platform in this repo (Phase 2
+of 5; the order is strictly 1 -> 2 -> 3 -> 4 -> 5). First read the existing code,
+PLAN.md, and README so you match the existing structure, conventions, Feast
+setup, evaluation protocol, and MLflow tracking. Then build PHASE 2 only.
+
+Goal: make features fresh in near-real-time, and close the measurement loop by
+logging what the system shows and computing recommendation quality.
+
+Add:
+1. Streaming ingestion. A Kafka setup (Docker) and a producer that replays the
+   test period of the dataset (events after the Phase 1 training cutoff, so
+   nothing leaks into training) as a time-ordered stream in the Phase 1 generic
+   event schema. Use a fixed, configurable speed-up (e.g. one day of event time
+   per second) and keep the original event timestamps. Validate events with a
+   pydantic contract; malformed events go to a dead-letter topic.
+2. Streaming features with PyFlink. A Flink job that consumes the stream using
+   event time and watermarks and computes near-real-time features: session
+   features (30-minute inactivity gap), last-N items, rolling interaction counts
+   (1h / 24h), and recency. Write them through Feast (push source / stream
+   feature view) with PushMode.ONLINE_AND_OFFLINE, never directly to Redis keys,
+   so training and serving share one definition and the offline store keeps a
+   history for point-in-time training. Given the same replay, the features must
+   come out the same. Add a ranker training option that includes the streaming
+   features (logged to MLflow as its own run). The README must contrast batch vs
+   streaming features and explain feature freshness.
+3. Online-feature cache. An in-process TTL cache in the serving layer for online
+   feature reads (item features at least), configurable on/off and TTL, with
+   hit/miss counts recorded alongside the existing latency histogram. The README
+   explains the latency vs staleness tradeoff. (Phase 4 benchmarks it.)
+4. Traffic simulation and logging. A simulator that, as replayed events arrive,
+   calls the serving endpoint for that user and logs:
+   - Impressions through a typed pydantic data contract (reject malformed
+     events): request_id, user_id, shown items, scores, ranks, model_version
+     (MLflow run id), experiment_id (nullable), variant (default "control"),
+     timestamp, schema_version. The variant fields are there now so Phase 5 can
+     use them without changing the contract.
+   - Interactions, with click attribution by a stated rule: a replayed
+     interaction by the same user with a shown item within a configurable window
+     (e.g. 24h of event time) after the impression counts as a click.
+   Write both to Parquet partitioned by date, queried with DuckDB. These are
+   simulated (counterfactual) outcomes, not real user feedback; the README and
+   every report must say so and state the attribution rule.
+5. Rec-quality metrics. Extend the Phase 1 metrics module (do not duplicate it):
+   from the logs, compute CTR, hit-rate@k, NDCG@k, and catalog coverage. Support
+   comparing two model variants by the variant field (e.g. ranker with vs without
+   streaming features) with point estimates and deltas only; confidence intervals
+   come in Phase 4 and significance tests in Phase 5. Expose it as `make metrics`
+   that prints a readable report.
+
+Stack notes:
+- Reuse Phase 1's Feast, Redis, FastAPI, models, evaluation protocol, metrics,
+  latency module, and MLflow tracking. Keep the models off-the-shelf.
+- Kafka and Flink run locally via docker-compose. Keep the dataset small.
+- Keep everything deterministic and seeded; pin any new dependencies (a separate
+  environment or container for PyFlink is fine).
+- `make demo` and all existing tests must keep passing.
+
+Out of scope for Phase 2 (do NOT build):
+- Dagster, data-quality frameworks, Terraform, AWS, Snowflake (Phase 3).
+- A benchmarks harness, confidence intervals (Phase 4).
+- MLflow model registry, A/B assignment, significance tests, drift monitoring,
+  Prometheus/Grafana (Phase 5).
+
+Documentation and presentation artifacts (part of the definition of done):
+- docs/phase-2.md: what this phase built and why, the key design decisions and
+  their tradeoffs, the measured results (real numbers from your run), and known
+  limitations or simplifications. Write it for an interviewer reading GitHub.
+- docs/decisions/: one short ADR per significant decision (context, options
+  considered, decision, consequences). For this phase at least: Feast push with ONLINE_AND_OFFLINE, event-time replay and watermarks, the cache TTL policy, the pydantic data contracts and dead-letter topic, the simulated click-attribution rule.
+- docs/img/: committed screenshots or captured output for this phase, taken with a
+  reproducible script (Playwright for web UIs, saved text/SVG for terminal
+  output) rather than by hand: streaming features updating in Redis with their event timestamps, the Flink job UI, cache hit rates, and the `make metrics` report.
+- Update the mermaid architecture diagram in the README so it shows the system as
+  of this phase, with this phase's new components visually marked.
+- Keep the README a concise front page: what the project is, the current
+  architecture diagram, how to run it, headline results, and links to docs/.
+  Detail lives in docs/.
+
+Process: write an updated PLAN.md section for Phase 2 and summarize it before
+implementing. Extend the Makefile with: stream-up, produce, flink-features,
+simulate, metrics, and a demo-streaming target that runs the live path end to
+end. When done, run it yourself and show me fresh features updating in Redis (with
+their event timestamps), cache hit rates, and a metrics report.
+
+Definition of done: interaction events flow Kafka to Flink to Feast (online and
+offline) updating features in near-real-time; the serving endpoint has a
+configurable feature cache; the simulator logs validated impressions and
+attributed interactions; `make metrics` prints a CTR / hit-rate / NDCG@k /
+coverage report with a two-variant comparison; `make demo` and tests still pass;
+the README explains streaming vs batch features, feature freshness, the cache
+tradeoff, and the simulated impression-logging and measurement loop.
+The docs/ artifacts above are written, screenshots are captured, and the
+README diagram reflects this phase.
