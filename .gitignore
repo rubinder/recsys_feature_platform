@@ -8,3 +8,13 @@ __pycache__/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# Phase 3: secrets and Terraform local files
+.secrets/
+.env.cloud
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate*
+infra/terraform/**/terraform.tfvars
+infra/terraform/**/backend.hcl
+infra/terraform/**/backend_override.tf
+infra/terraform/**/tfplan

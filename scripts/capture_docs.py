@@ -77,13 +77,19 @@ def phase2() -> None:
                                  "--out", "latency_no_cache.json"])
     out("latency-cache.txt", [py, "-m", "recsys.latency.loadgen", "--variant", "streaming_session",
                               "--out", "latency_cache.json"])
-    with sync_playwright() as p:
-        page = p.chromium.launch().new_page(viewport={"width": 1440, "height": 900})
-        jobs = httpx.get("http://localhost:8081/jobs/overview").json()["jobs"]
-        jid = next(j["jid"] for j in jobs if j["state"] == "RUNNING")
-        page.goto(f"http://localhost:8081/#/job/running/{jid}/overview")
-        page.wait_for_timeout(4000)
-        page.screenshot(path=str(IMG / "phase2-flink-job.png"))
+    from recsys.streaming import flink_ctl
+
+    jid = next(j["jid"] for j in flink_ctl.jobs() if j["state"] == "RUNNING")
+    subprocess.run(["docker", "compose", "--profile", "flink-ui", "up", "-d", "flink-ui"], cwd=ROOT, check=True)
+    try:
+        time.sleep(2)
+        with sync_playwright() as p:
+            page = p.chromium.launch().new_page(viewport={"width": 1440, "height": 900})
+            page.goto(f"http://localhost:8081/#/job/running/{jid}/overview")
+            page.wait_for_timeout(4000)
+            page.screenshot(path=str(IMG / "phase2-flink-job.png"))
+    finally:
+        subprocess.run(["docker", "compose", "--profile", "flink-ui", "rm", "-sf", "flink-ui"], cwd=ROOT, check=True)
 
 
 if __name__ == "__main__":

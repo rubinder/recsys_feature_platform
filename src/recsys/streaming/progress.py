@@ -20,10 +20,10 @@ def get(r: redis.Redis) -> int:
 
 
 def _job_failed() -> str | None:
-    import httpx
+    from recsys.streaming import flink_ctl
 
     try:
-        jobs = httpx.get("http://localhost:8081/jobs/overview", timeout=5).json()["jobs"]
+        jobs = flink_ctl.jobs()
     except Exception:
         return None
     if jobs and not any(j["state"] == "RUNNING" for j in jobs):
@@ -42,6 +42,6 @@ def wait_for(r: redis.Redis, seq: int, timeout_s: float = 600, poll_s: float = 0
             last_check = now
             failed = _job_failed()
             if failed:
-                raise RuntimeError(f"Flink job is not running ({failed}); see http://localhost:8081")
+                raise RuntimeError(f"Flink job is not running ({failed}); run `make flink-ui` to inspect")
         time.sleep(poll_s)
     return time.monotonic() - t0

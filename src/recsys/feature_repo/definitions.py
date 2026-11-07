@@ -15,6 +15,7 @@ from feast import Entity, FeatureView, Field, FileSource, PushSource, ValueType
 from feast.on_demand_feature_view import on_demand_feature_view
 from feast.types import Array, Float32, Float64, Int64
 
+from recsys.cloud import env, is_cloud
 from recsys.config import OFFLINE
 
 TTL = timedelta(days=14)  # snapshots are weekly; 14d tolerates one missed run
@@ -23,7 +24,13 @@ user = Entity(name="user", join_keys=["user_id"], value_type=ValueType.INT64, de
 item = Entity(name="item", join_keys=["item_id"], value_type=ValueType.INT64, description="Catalog item")
 
 
-def _source(name: str) -> FileSource:
+def _source(name: str):
+    """Parquet locally; the same table in Snowflake under RECSYS_PROFILE=cloud."""
+    if is_cloud():
+        from feast.infra.offline_stores.snowflake_source import SnowflakeSource
+
+        return SnowflakeSource(name=f"{name}_source", database=env("RECSYS_SF_DATABASE"), schema=env("RECSYS_SF_SCHEMA"),
+                               table=name.upper(), timestamp_field="event_timestamp")
     return FileSource(name=f"{name}_source", path=str(OFFLINE / f"{name}.parquet"), timestamp_field="event_timestamp")
 
 
@@ -111,7 +118,9 @@ def user_item_affinity(inputs: pd.DataFrame) -> pd.DataFrame:
 # file-store offline push, which rewrites the whole file on every append).
 user_stream_push = PushSource(
     name="user_stream_push",
-    batch_source=FileSource(
+    # In the cloud profile the batch source is a Snowflake table, where Feast's
+    # offline push appends natively (no whole-file rewrite).
+    batch_source=_source("user_stream") if is_cloud() else FileSource(
         name="user_stream_source", path=str(OFFLINE / "user_stream" / "*.parquet"), timestamp_field="event_timestamp"
     ),
 )

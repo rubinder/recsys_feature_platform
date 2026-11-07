@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+alert_email = "you@example.com"
+# feast_rsa_public_key is passed by `make terraform-plan` from .secrets/feast_rsa_key.pub
+# enable_msk         = false   # ~$70/month
+# enable_elasticache = false   # ~$12/month

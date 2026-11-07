@@ -1,0 +1,9 @@
+output "database" { value = snowflake_database.this.name }
+output "schema" { value = snowflake_schema.features.name }
+output "warehouse" { value = snowflake_warehouse.this.name }
+output "role" { value = snowflake_account_role.feast.name }
+output "user" { value = snowflake_service_user.feast.name }
+output "stage" { value = snowflake_stage_external_s3.lake.name }
+output "storage_integration" { value = snowflake_storage_integration_aws.lake.name }
+output "storage_aws_iam_user_arn" { value = snowflake_storage_integration_aws.lake.describe_output[0].iam_user_arn }
+output "storage_aws_external_id" { value = random_uuid.external_id.result }

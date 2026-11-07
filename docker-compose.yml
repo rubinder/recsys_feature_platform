@@ -63,7 +63,8 @@ services:
       redis: { condition: service_healthy }
     environment:
       REDIS_CONNECTION: redis:6379
-    ports: ["127.0.0.1:6566:6566"]
+    # Not published to the host: only Flink (inside the compose network) pushes
+    # features, and /push accepts unauthenticated writes.
     volumes:
       - ./data:/app/data
       - ./data:${PWD}/data
@@ -77,7 +78,10 @@ services:
     image: recsys-flink:2.2.1
     profiles: [stream]
     command: jobmanager
-    ports: ["127.0.0.1:8081:8081"]
+    # REST/UI port deliberately NOT published: Flink's REST API accepts job
+    # submissions without auth (POST /jobs), which a DNS-rebinding web page could
+    # reach on localhost. Tooling uses it from inside the container; for the
+    # dashboard run `make flink-ui` (temporary loopback proxy).
     environment: &flink-env
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: jobmanager
@@ -87,6 +91,11 @@ services:
         python.fn-execution.bundle.size: 1000
         python.fn-execution.bundle.time: 5
         python.execution-mode: thread
+        # No job upload/run/cancel over REST: the UI is reachable from the host's
+        # browser, so a DNS-rebinding page could otherwise submit code. Jobs are
+        # managed with the flink CLI inside the jobmanager container.
+        web.submit.enable: false
+        web.cancel.enable: false
         taskmanager.memory.process.size: 2048m
       KAFKA_BOOTSTRAP: kafka:29092
       FEATURE_SERVER_URL: http://feature-server:6566
@@ -95,6 +104,12 @@ services:
       test: ["CMD", "curl", "-fs", "http://localhost:8081/overview"]
       interval: 3s
       retries: 40
+
+  flink-ui:  # opt-in: `make flink-ui`, then http://localhost:8081
+    image: alpine/socat:1.8.0.3
+    profiles: [flink-ui]
+    command: tcp-listen:8081,fork,reuseaddr tcp-connect:jobmanager:8081
+    ports: ["127.0.0.1:8081:8081"]
 
   taskmanager:
     image: recsys-flink:2.2.1
