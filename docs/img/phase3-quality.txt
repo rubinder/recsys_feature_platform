@@ -1,0 +1,19 @@
+uv run python -m recsys.quality.run
+[PASS        ] raw_events.schema: rows=1000209
+[PASS        ] raw_events.referential_integrity: events_with_unknown_item=0, events_with_unknown_user=0
+[PASS        ] raw_events.duplicate_rate: duplicate_rate=0.0
+[PASS        ] user_stats.schema: rows=90656
+[PASS        ] item_popularity.schema: rows=118640
+[PASS        ] item_stats.schema: rows=118640
+[PASS        ] features.avg_weight_within_event_range: event_weight_min=1.0, event_weight_max=5.0
+[PASS        ] features.genre_vectors: genres=18, share_sum_max_error=5.21540641784668e-08
+[PASS        ] features.null_rate: max_null_rate_user_stats=0.0, max_null_rate_user_genre_affinity=0.0, max_null_rate_item_popularity=0.0, max_null_rate_item_stats=0.0
+[PASS        ] features.referential_integrity: feature_rows_unknown_user=0, feature_rows_unknown_item=0
+[PASS        ] features.snapshot_grid: rows_off_grid=0, latest_snapshot=2000-12-29 00:00:00+00:00
+[PASS        ] user_stream.schema: rows=898002
+[PASS        ] user_stream.timestamps_within_data_range: rows_outside=0, min=2000-04-25 23:05:32+00:00, max=2000-12-28 23:59:55+00:00, data_min=2000-04-25 23:05:32+00:00, data_max=2003-02-28 17:49:51+00:00
+[PASS        ] user_stream.unique_timestamp_per_user: duplicate_user_timestamps=0
+[PASS        ] online.batch_freshness: clock=2000-12-29T00:00:00+00:00, sla_days=8, user_newest=2000-12-29 00:00:00+00:00, item_newest=2000-12-29 00:00:00+00:00, user_age_days=0.0, item_age_days=0.0, missing=none, stale=none
+[PASS        ] online.stream_freshness: status=no live events produced yet
+
+16/16 checks passed

@@ -200,3 +200,99 @@ Feast's file-store offline push (ADR 0007); session-anchored training added
 Dagster, data quality frameworks, Terraform/AWS/Snowflake (Phase 3);
 benchmarks and confidence intervals (Phase 4); registry, A/B assignment,
 significance tests, monitoring (Phase 5).
+
+---
+
+## Phase 3: Orchestration, data quality, infrastructure as code
+
+### Goal
+
+Production-grade operation of the batch path (Dagster), enforced data quality
+and freshness, and the real cloud footprint (AWS + Snowflake) defined in
+Terraform, while `make demo` keeps working with no cloud accounts.
+
+### Dagster
+
+Code location `recsys.orchestration` (one module per concern):
+
+```
+landing/ (sensor) ─┐
+weekly schedule ───┴─> batch_pipeline job
+raw_events ─> batch_features ──┐
+          └─> streaming_backfill┴─> feast_registry ─> online_store
+                                         └─> ranker_batch, ranker_batch_session,
+                                             ranker_streaming_session ─> offline_metrics
+impression_logs (observable source, written by the simulator/API) ─> rec_quality_report
+```
+
+- Every asset wraps the existing Phase 1/2 functions; nothing is rewritten.
+- **Blocking asset checks** (Pandera) stop downstream assets on bad data:
+  raw schema, value ranges, null rates, referential integrity (features → users /
+  items), snapshot grid alignment, streaming invariants (monotonic timestamps,
+  1h ≤ 24h, last-N ≤ 10, timestamps inside the data range, which would have
+  caught the Phase 2 "1970" bug).
+- **Freshness SLA checks** on the online store: batch views' newest timestamp in
+  Redis vs the serving clock (SLA 8 days), streaming lag between the last
+  produced event and Flink's progress marker (SLA 300 s of event time). Failures
+  are ERROR-severity check results with the measured lag as metadata.
+- `RetryPolicy(max_retries=3, exponential backoff)` on every asset.
+- The streaming job stays long-running outside Dagster; its health is covered by
+  the streaming freshness check.
+- Makefile targets become thin wrappers over `dagster asset materialize` /
+  `dagster job execute`.
+
+### Terraform (real AWS + Snowflake; `apply` only by the user)
+
+```
+infra/terraform/
+  bootstrap/   S3 state bucket + DynamoDB lock table (local state)
+  modules/aws/        lake bucket, MLflow artifacts bucket, IAM (app + Snowflake
+                      integration role), budget alarm, optional VPC + MSK +
+                      ElastiCache (var-gated, default off)
+  modules/snowflake/  warehouse (XS, 60 s auto-suspend), resource monitor,
+                      database, schema, role, service user (key pair), grants,
+                      S3 storage integration, Parquet file format, external stage
+  envs/main/   wires modules, providers, S3 backend (partial config from bootstrap)
+```
+
+Credentials come from the environment only: AWS profile/SSO, and Snowflake via
+env vars generated from `~/.snowflake/connections.toml` (never printed or
+committed). The Feast service user uses key-pair auth.
+
+### Estimated monthly cost
+
+| Resource | Default (off) | Enabled |
+|---|---:|---:|
+| S3 (lake + MLflow + state, < 1 GB) | < $0.10 | |
+| DynamoDB lock table (on-demand) | ~ $0 | |
+| AWS Budget alarm | $0 (first 2 free) | |
+| Snowflake XS warehouse (1 credit/h, 60 s auto-suspend, ~0.5 h/month of demo use) | ~ $1–2 | |
+| Snowflake storage (< 1 GB) | < $0.05 | |
+| ElastiCache `cache.t4g.micro`, 1 node | off | ~ $12 |
+| MSK provisioned, 2 × `kafka.t3.small` + 2 × 10 GB storage | off | ~ $70 |
+| VPC (no NAT gateway) | off | $0 |
+
+The resource monitor caps Snowflake at 10 credits/month (suspends at 100%), and
+the AWS budget alerts at 80% and 100% of $25/month.
+
+### Snowflake offline store
+
+`RECSYS_PROFILE=cloud` switches the Feast config to `snowflake.offline` and the
+sources to `SnowflakeSource`; `make demo-snowflake` uploads the offline Parquet
+to the lake bucket, loads Snowflake through the external stage, runs
+point-in-time retrieval on Snowflake, and compares it with the local result. The
+local profile stays the default.
+
+### Make targets
+
+`pipeline`, `dagster-dev`, `quality`, `terraform-bootstrap`, `terraform-plan`,
+`terraform-apply`, `terraform-destroy`, `demo-snowflake`.
+
+### Status
+
+Done, except the steps that create billable cloud resources (`terraform apply`,
+`make demo-snowflake`), which are left to the account owner. See
+[docs/phase-3.md](docs/phase-3.md). Changes from this plan: S3-native state
+locking instead of DynamoDB (deprecated); stable Snowflake provider resources
+(`*_aws`, `*_external_s3`, `*_parquet`); security hardening of local services
+(ADR 0014).

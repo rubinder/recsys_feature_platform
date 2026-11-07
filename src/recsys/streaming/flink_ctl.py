@@ -1,4 +1,5 @@
-"""Submit / cancel the Flink job via the JobManager (REST + `flink run` in the container)."""
+"""Submit / cancel the Flink job. Everything runs inside the jobmanager container:
+the REST port is not published to the host (see docker-compose.yml)."""
 
 from __future__ import annotations
 
@@ -6,20 +7,31 @@ import argparse
 import subprocess
 import time
 
-import httpx
+import json
 
-REST = "http://localhost:8081"
 JOB_NAME = "recsys-user-stream-features"
 
 
+def rest(path: str) -> dict:
+    """GET Flink's REST API from inside the jobmanager container."""
+    out = subprocess.run(["docker", "compose", "exec", "-T", "jobmanager", "curl", "-fs", f"http://localhost:8081{path}"],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)
+
+
+def jobs() -> list[dict]:
+    return rest("/jobs/overview")["jobs"]
+
+
 def running_jobs() -> list[str]:
-    jobs = httpx.get(f"{REST}/jobs/overview", timeout=10).json()["jobs"]
-    return [j["jid"] for j in jobs if j["state"] in ("RUNNING", "CREATED", "INITIALIZING", "RESTARTING")]
+    return [j["jid"] for j in jobs() if j["state"] in ("RUNNING", "CREATED", "INITIALIZING", "RESTARTING")]
 
 
 def cancel_all() -> None:
+    # REST cancel is disabled (web.cancel.enable: false); use the CLI in the container.
     for jid in running_jobs():
-        httpx.patch(f"{REST}/jobs/{jid}", params={"mode": "cancel"}, timeout=10)
+        subprocess.run(["docker", "compose", "exec", "-T", "jobmanager", "flink", "cancel", jid],
+                       check=True, capture_output=True)
     for _ in range(100):
         if not running_jobs():
             return
@@ -37,10 +49,10 @@ def fresh_taskmanager() -> None:
     subprocess.run(["docker", "compose", "restart", "taskmanager"], check=True, capture_output=True)
     for _ in range(120):
         try:
-            tms = httpx.get(f"{REST}/taskmanagers", timeout=5).json()["taskmanagers"]
+            tms = rest("/taskmanagers")["taskmanagers"]
             if tms and sum(t["freeSlots"] for t in tms) >= 1:
                 return
-        except httpx.HTTPError:
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
             pass
         time.sleep(0.5)
     raise RuntimeError("taskmanager did not register with the jobmanager")
@@ -54,8 +66,7 @@ def submit() -> None:
         check=True,
     )
     for _ in range(150):
-        jobs = httpx.get(f"{REST}/jobs/overview", timeout=10).json()["jobs"]
-        if any(j["name"] == JOB_NAME and j["state"] == "RUNNING" for j in jobs):
+        if any(j["name"] == JOB_NAME and j["state"] == "RUNNING" for j in jobs()):
             print("flink job running:", JOB_NAME)
             return
         time.sleep(0.5)

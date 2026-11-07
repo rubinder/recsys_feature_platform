@@ -8,10 +8,10 @@ model sees the same feature values in both places.
 The data infrastructure is the deliverable; the models (implicit ALS +
 LightGBM LambdaRank) are off-the-shelf.
 
-> **Status: Phase 2 of 5.** Core feature platform (Phase 1) plus streaming
-> features, a feature cache, impression logging and rec-quality metrics (Phase 2).
-> Orchestration and cloud infrastructure, benchmarks, and the production loop
-> follow (see [PLAN.md](PLAN.md)).
+> **Status: Phase 3 of 5.** Core feature platform (Phase 1), streaming features
+> and the measurement loop (Phase 2), Dagster orchestration with blocking data
+> quality checks and Terraform for real AWS + Snowflake (Phase 3). Benchmarks and
+> the production loop follow (see [PLAN.md](PLAN.md)).
 
 ## Architecture
 
@@ -19,42 +19,43 @@ LightGBM LambdaRank) are off-the-shelf.
 flowchart LR
   classDef new fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
 
-  ML[(MovieLens 1M)] --> ING[Ingest<br/>generic schema]
-  ING --> RAW[(data/raw<br/>events · items · users)]
-  RAW --> SPARK[PySpark<br/>weekly feature snapshots]
-  SPARK --> OFF[(Offline store<br/>Parquet via DuckDB)]
-  RAW --> BF[Streaming backfill<br/>same logic as Flink]:::new
-  BF --> OFF
+  subgraph DAG[Dagster: batch assets, blocking quality checks, retries, schedule + sensor]
+    ING[raw_events] --> SPARK[batch_features<br/>PySpark]
+    ING --> BF[streaming_backfill]
+    SPARK --> REG[feast_registry]
+    BF --> REG
+    REG --> ONL[online_store]
+    REG --> TRAIN[rankers ×3<br/>ALS + LambdaRank]
+    TRAIN --> OM[offline_metrics]
+  end
+  class DAG new
 
-  RAW --> PROD[Producer / simulator<br/>replay, contract, seq]:::new
-  PROD --> KAFKA[(Kafka<br/>interactions)]:::new
-  KAFKA --> FLINK[PyFlink job<br/>event time · keyed state]:::new
-  FLINK -->|invalid / late| DLQ[(Kafka DLQ)]:::new
-  FLINK -->|push online| FS[Feast feature server]:::new
+  ML[(MovieLens 1M)] --> ING
+  SPARK --> OFF[(Offline store<br/>Parquet/DuckDB · or Snowflake)]
+  BF --> OFF
+  ONL --> REDIS[(Redis<br/>· or ElastiCache)]
+  TRAIN --> MLF[(MLflow<br/>local · or S3)]
+
+  RAW2[(events)] --> PROD[Producer / simulator]
+  PROD --> KAFKA[(Kafka · or MSK)]
+  KAFKA --> FLINK[PyFlink job]
+  FLINK -->|invalid / late / dup| DLQ[(DLQ)]
+  FLINK --> FS[Feast feature server] --> REDIS
   FLINK -->|append-only parts| OFF
 
-  subgraph FEAST[Feast: one set of feature definitions]
-    DEF[Batch views · streaming push view<br/>on-demand genre affinity]
-  end
-  OFF --- DEF
-  DEF -->|materialize| REDIS[(Online store<br/>Redis)]
-  FS --> REDIS
-
-  RAW --> LBL[Weekly + session anchors<br/>7-day labels]
-  LBL --> PIT[get_historical_features<br/>point-in-time join]
-  DEF --> PIT
-  PIT --> TRAIN[ALS candidates +<br/>LightGBM LambdaRank]
-  TRAIN --> MLF[(MLflow<br/>runs + artifacts)]
-
-  MLF -->|variants by run id| API[FastAPI<br/>/recommendations/user_id]
-  REDIS -->|user features fresh,<br/>item features cached| API
-  API --> IMP[(Impression log<br/>contract, Parquet)]:::new
-  PROD --> INT[(Interaction log)]:::new
-  IMP --> MET[Rec metrics<br/>CTR · NDCG · coverage]:::new
+  MLF --> API[FastAPI<br/>variants · cache]
+  REDIS --> API
+  API --> IMP[(Impression log)]
+  PROD --> INT[(Interaction log)]
+  IMP --> MET[rec_quality_report]
   INT --> MET
+
+  Q[Pandera + freshness SLAs]:::new -.-> DAG
+  TF[Terraform: S3 · IAM · budget · Snowflake<br/>MSK + ElastiCache opt-in]:::new -.-> OFF
 ```
 
-Blue = added in Phase 2 (streaming, logging, measurement). Everything else is Phase 1.
+Blue = added in Phase 3. "· or X" marks the cloud equivalent selected by
+`RECSYS_PROFILE=cloud` / provisioned by Terraform; the default is fully local.
 
 ## How online/offline consistency works
 
@@ -133,10 +134,24 @@ interaction with a shown item within 24 h). Details in [docs/phase-2.md](docs/ph
   concurrency 8, 97.8% hit rate.
 - **Contracts:** 6/6 injected malformed events rejected to a dead-letter topic.
 
+### Phase 3: orchestration, quality, infrastructure
+
+Details in [docs/phase-3.md](docs/phase-3.md).
+
+- **Dagster:** 11 assets, 16 checks (14 blocking data-quality + 2 freshness SLAs),
+  retries, weekly schedule, new-data sensor; the full batch job runs in ~2.5 min.
+- **Failure signal:** with the clock moved 2.5 weeks ahead, batch freshness fails
+  (17 days old vs an 8-day SLA); a failing blocking check provably stops
+  downstream assets.
+- **Terraform** against real AWS + Snowflake: `plan` = 38 resources (46 with MSK
+  + ElastiCache), estimated ~$2/month by default. Not applied by automation.
+
 ## Run it
 
 Prerequisites: Docker (running), Java 17+ (for PySpark), [uv](https://docs.astral.sh/uv/),
-and on macOS `brew install libomp` (OpenMP runtime for LightGBM).
+and on macOS `brew install libomp` (OpenMP runtime for LightGBM). For the cloud
+path only: Terraform ≥ 1.10, AWS credentials, a Snowflake connection in
+`~/.snowflake/connections.toml`.
 
 ```bash
 make demo        # fresh checkout -> Redis, features, materialize, parity, train, API, sample recs
@@ -156,7 +171,19 @@ make metrics           # rec-quality report from the impression/interaction logs
 make produce DAYS=3 SPEEDUP=43200 MALFORMED=5   # free-running live replay
 ```
 
-Flink dashboard: http://localhost:8081. Kafka, Flink and the Feast feature server
+Orchestration and infrastructure (Phase 3):
+
+```bash
+make dagster-dev       # Dagster UI on http://localhost:3000: lineage, checks, schedules, sensors
+make pipeline          # the batch job (also what `make demo` runs)
+make quality           # every data-quality + freshness check, standalone
+RECSYS_CLOCK=2001-01-15T00:00:00 make freshness   # rehearse a stale-feature failure
+make terraform-plan    # read-only plan against your AWS + Snowflake (see docs/phase-3.md)
+```
+
+Flink dashboard: `make flink-ui`, then http://localhost:8081 (the REST port is not
+published by default because it accepts unauthenticated job submissions). Kafka,
+Flink and the Feast feature server
 run under the docker-compose `stream` profile (`make stream-up` / `stream-down`).
 `make docs-capture` regenerates the screenshots and captured output in `docs/img/`.
 
@@ -171,6 +198,7 @@ curl localhost:8000/latency                     # server-side p50/p95/p99 per st
 
 - [Phase 1 write-up](docs/phase-1.md): what was built, decisions, measured results, limitations
 - [Phase 2 write-up](docs/phase-2.md): streaming features, cache, logging, metrics, and the bugs found on the way
+- [Phase 3 write-up](docs/phase-3.md): Dagster, data quality and freshness, Terraform, local → cloud mapping, costs
 - [Decision records](docs/decisions/)
 - [Captured output and screenshots](docs/img/)
 - [PLAN.md](PLAN.md): the five-phase plan
