@@ -93,6 +93,19 @@ GROUPS: dict[str, list[str]] = {
 }
 
 
+ARRAY_COLUMNS = ("user_genre_share", "item_genre_vector", "stream_last_items")
+
+
+def normalize_arrays(df: pd.DataFrame) -> pd.DataFrame:
+    """Array features as Python lists whatever the offline store: Snowflake returns them as JSON text."""
+    import json
+
+    for col in ARRAY_COLUMNS:
+        if col in df.columns and df[col].map(lambda v: isinstance(v, str)).any():
+            df[col] = df[col].map(lambda v: json.loads(v) if isinstance(v, str) else v)
+    return df
+
+
 def to_matrix(df: pd.DataFrame, columns: list[str] = MODEL_FEATURES) -> np.ndarray:
     """Model input matrix in a fixed column order; missing values become NaN."""
     return df[columns].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)

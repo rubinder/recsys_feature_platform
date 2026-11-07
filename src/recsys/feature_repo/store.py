@@ -26,7 +26,7 @@ def offline_store_config() -> dict:
         "schema": env("RECSYS_SF_SCHEMA"),
         "authenticator": "SNOWFLAKE_JWT",
         "private_key": env("RECSYS_SF_PRIVATE_KEY_PATH"),
-        "convert_timestamp_columns": True,
+        "convert_timestamp_columns": False,  # True makes Feast emit an unquoted timestamp column (breaks lowercase columns)
     }
 
 

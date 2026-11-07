@@ -197,7 +197,8 @@ demo-production-loop: ## after demo-streaming: registry, A/B experiment, retrain
 # infra/terraform/envs/main/terraform.tfvars (see terraform.tfvars.example).
 TF_MAIN := infra/terraform/envs/main
 TF_BOOT := infra/terraform/bootstrap
-SF_ENV := eval "$$(uv run python scripts/snowflake_env.py)"
+# AWS: export the CLI session (works with `aws login` / SSO, which Terraform's S3 backend can't read directly).
+SF_ENV := eval "$$(aws configure export-credentials --format env 2>/dev/null)" && eval "$$(uv run python scripts/snowflake_env.py)"
 TF_KEY := -var "feast_rsa_public_key=$$(grep -v -- '-----' $(CURDIR)/.secrets/feast_rsa_key.pub | tr -d '\n')"
 
 snowflake-keys: ## key pair for the Feast service user (.secrets/, gitignored)

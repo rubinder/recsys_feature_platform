@@ -96,10 +96,16 @@ def user_item_affinity(inputs: pd.DataFrame) -> pd.DataFrame:
     Self-contained on purpose: Feast serializes this function's source, so it
     cannot call module-level helpers.
     """
+    import json
+
     import numpy as np
     import pandas as pd
 
+    def arr(v):  # Snowflake returns ARRAY columns as JSON text; DuckDB and Redis return lists
+        return json.loads(v) if isinstance(v, str) else v
+
     def dot(share, onehot):
+        share, onehot = arr(share), arr(onehot)
         if share is None or onehot is None:
             return float("nan")
         s, o = np.asarray(share, dtype=float), np.asarray(onehot, dtype=float)

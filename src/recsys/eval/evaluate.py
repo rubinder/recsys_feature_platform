@@ -16,7 +16,7 @@ from feast import FeatureStore
 from recsys import scoring
 from recsys.eval.metrics import evaluate
 from recsys.features.derived import add_stream_derived
-from recsys.features.features import BATCH, FeatureSet
+from recsys.features.features import BATCH, FeatureSet, normalize_arrays
 from recsys.training import candidates
 from recsys.training.candidates import ALSModel
 
@@ -41,7 +41,7 @@ def candidate_frame(model: ALSModel, users: list[int], t: datetime, k: int) -> p
 def with_features(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet = BATCH) -> pd.DataFrame:
     """Point-in-time join, merged back on keys (Feast does not preserve row order)."""
     keys = ["user_id", "item_id", "event_timestamp"]
-    feats = store.get_historical_features(entity_df=rows[keys], features=fs.refs).to_df()
+    feats = normalize_arrays(store.get_historical_features(entity_df=rows[keys], features=fs.refs).to_df())
     feats["event_timestamp"] = pd.to_datetime(feats["event_timestamp"], utc=True)
     rows = rows.assign(event_timestamp=pd.to_datetime(rows["event_timestamp"], utc=True))
     out = rows.merge(feats, on=keys, how="left", validate="one_to_one")
@@ -54,7 +54,8 @@ def with_latest_features(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet
     """The naive join (benchmark only): every row gets feature values as of `latest`,
     regardless of its own timestamp, i.e. "join the latest feature table"."""
     pairs = rows[["user_id", "item_id"]].drop_duplicates().assign(event_timestamp=pd.Timestamp(latest))
-    feats = store.get_historical_features(entity_df=pairs, features=fs.refs).to_df().drop(columns=["event_timestamp"])
+    feats = normalize_arrays(store.get_historical_features(entity_df=pairs, features=fs.refs).to_df()).drop(
+        columns=["event_timestamp"])
     out = rows.merge(feats, on=["user_id", "item_id"], how="left", validate="many_to_one")
     if len(out) != len(rows):
         raise RuntimeError("feature join changed row count")

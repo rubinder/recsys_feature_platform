@@ -80,9 +80,10 @@ def retrieve(profile: str, entities: pd.DataFrame) -> pd.DataFrame:
     entities.to_parquet(OFFLINE.parent / "artifacts" / "pit_entities.parquet")
     code = (
         "import pandas as pd; from recsys.feature_repo.store import get_store, apply; apply();"
-        "from recsys.features.features import STREAMING;"
+        "from recsys.features.features import STREAMING, normalize_arrays;"
         f"e = pd.read_parquet('{OFFLINE.parent / 'artifacts' / 'pit_entities.parquet'}');"
-        f"get_store().get_historical_features(entity_df=e, features=STREAMING.refs).to_df().to_parquet('{out}')"
+        "df = normalize_arrays(get_store().get_historical_features(entity_df=e, features=STREAMING.refs).to_df());"
+        f"df.to_parquet('{out}')"
     )
     subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ, "RECSYS_PROFILE": profile})
     return pd.read_parquet(out)
@@ -106,9 +107,12 @@ def compare(local: pd.DataFrame, cloud: pd.DataFrame) -> list[str]:
 
 
 def main() -> None:
-    upload()
-    with connect() as conn:
-        load(conn)
+    import sys as _sys
+
+    if "--skip-load" not in _sys.argv:
+        upload()
+        with connect() as conn:
+            load(conn)
     ents = sample_entities()
     bad = compare(retrieve("local", ents), retrieve("cloud", ents))
     if bad:

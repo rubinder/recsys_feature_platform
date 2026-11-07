@@ -154,3 +154,12 @@ resource "snowflake_grant_privileges_to_account_role" "stage" {
     object_name = "\"${snowflake_database.this.name}\".\"${snowflake_schema.features.name}\".\"${snowflake_stage_external_s3.lake.name}\""
   }
 }
+
+resource "snowflake_grant_privileges_to_account_role" "file_format" {
+  account_role_name = snowflake_account_role.feast.name
+  privileges        = ["USAGE"]
+  on_schema_object {
+    object_type = "FILE FORMAT"
+    object_name = snowflake_file_format_parquet.parquet.fully_qualified_name
+  }
+}
