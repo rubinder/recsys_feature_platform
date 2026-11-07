@@ -18,7 +18,6 @@ spec:
       annotations: {prometheus.io/scrape: "true", prometheus.io/path: /metrics/, prometheus.io/port: "8000"}
     spec:
       serviceAccountName: recsys
-      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -40,20 +39,25 @@ spec:
             - name: RECSYS_ADMIN_TOKEN
               valueFrom: {secretKeyRef: {name: {{ .Values.adminTokenSecret | quote }}, key: token}}
             {{- end }}
+          {{- include "recsys.envFrom" . | nindent 10 }}
           readinessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 10, periodSeconds: 5}
-          livenessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 60, periodSeconds: 15}
+          livenessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 90, periodSeconds: 15}
           resources: {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}  # model bundles are downloaded to a temp dir
             {{- if .Values.hostRoot }}
-            - {name: data, mountPath: /app/data}  # impression logs are written here
+            - {name: data, mountPath: /app/data}
             - {name: mlruns, mountPath: "{{ .Values.hostRoot }}/mlruns", readOnly: true}
+            {{- else }}
+            - {name: data, mountPath: /app/data}  # impression logs (ephemeral in this deployment)
             {{- end }}
       volumes:
         - {name: tmp, emptyDir: {}}
         {{- if .Values.hostRoot }}
         - {name: data, hostPath: {path: "{{ .Values.hostRoot }}/data", type: Directory}}
         - {name: mlruns, hostPath: {path: "{{ .Values.hostRoot }}/mlruns", type: Directory}}
+        {{- else }}
+        - {name: data, emptyDir: {}}
         {{- end }}
 ---
 apiVersion: v1
@@ -63,6 +67,9 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   selector: {app: recsys-api}
+  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.sourceRanges }}
+  loadBalancerSourceRanges: {{- toYaml .Values.service.sourceRanges | nindent 4 }}
+  {{- end }}
   ports:
     - port: 80
       targetPort: http

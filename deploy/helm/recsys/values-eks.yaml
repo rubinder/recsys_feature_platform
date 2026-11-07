@@ -1,0 +1,18 @@
+# EKS overrides (rendered by scripts/eks_session.py; image and URIs are set there).
+replicas: 2
+hostRoot: ""
+service:
+  type: LoadBalancer
+  sourceRanges: []        # set to the operator's IP/32 by eks_session.py
+redis:
+  enabled: false
+  externalSecret: recsys-redis      # Secret with key `connection` (ElastiCache TLS + AUTH)
+cloud:
+  enabled: true                     # RECSYS_PROFILE=cloud: Feast registry in S3, Snowflake offline store
+  configMap: recsys-cloud           # non-secret Snowflake / S3 names
+  snowflakeKeySecret: recsys-snowflake-key   # Feast service user's private key (materialize Job only)
+materialize:
+  enabled: true
+api:
+  modelVariants: ""                 # e.g. champion=s3://<mlflow bucket>/artifacts/<exp>/<run>/artifacts/model
+  defaultVariant: champion

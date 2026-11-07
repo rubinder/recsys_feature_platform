@@ -1,0 +1,66 @@
+{
+  "started": "2026-11-07T21:48:40Z",
+  "bring_up_minutes": 12.5,
+  "materialize_seconds": 67,
+  "in_cluster": {
+    "runs": [
+      {
+        "concurrency": 1,
+        "requests": 1500,
+        "p50_ms": 19.885971000007885,
+        "p95_ms": 24.07481000000189,
+        "p99_ms": 30.163311000023896,
+        "rps": 48.857433502420854
+      },
+      {
+        "concurrency": 8,
+        "requests": 3000,
+        "p50_ms": 85.90001400000347,
+        "p95_ms": 154.0285430000381,
+        "p99_ms": 230.53667099998165,
+        "rps": 86.06300735221322
+      }
+    ],
+    "server_stages_ms": {
+      "candidates": {
+        "count": 3065,
+        "mean_ms": 0.6892863869502568,
+        "p50_ms": 0.25375299998131595,
+        "p95_ms": 1.880620800011456,
+        "p99_ms": 12.913258719997895
+      },
+      "online_features": {
+        "count": 3043,
+        "mean_ms": 15.459358845875558,
+        "p50_ms": 9.643478999976196,
+        "p95_ms": 39.45001670003308,
+        "p99_ms": 57.21903330000713
+      },
+      "ranking": {
+        "count": 3043,
+        "mean_ms": 15.223240533683633,
+        "p50_ms": 7.704697999997734,
+        "p95_ms": 40.72881089998646,
+        "p99_ms": 58.58257646000309
+      },
+      "total": {
+        "count": 3065,
+        "mean_ms": 31.156698215661304,
+        "p50_ms": 18.753885999984732,
+        "p95_ms": 72.00978500002284,
+        "p99_ms": 97.19790012002933
+      }
+    }
+  },
+  "endpoint": "http://a80dcdc3d57c24625bb3adbbdfb99954-518461388.us-east-1.elb.amazonaws.com",
+  "tear_down_minutes": 11.0,
+  "verify": {
+    "eks_clusters": "",
+    "elasticache": "",
+    "ec2_running": "",
+    "k8s_load_balancers": "",
+    "ecr_repo": ""
+  },
+  "clean": true,
+  "total_minutes": 29.6
+}

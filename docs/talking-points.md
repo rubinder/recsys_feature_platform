@@ -56,15 +56,18 @@ A test proves cached and uncached paths give identical model inputs.
 The cloud profile switches Feast's offline store to Snowflake and MLflow
 artifacts to S3; Terraform defines S3, IAM, Snowflake (warehouse, resource
 monitor, key-pair service user, storage integration, stage), and opt-in MSK,
-ElastiCache and EKS in one VPC. `terraform plan` resolves against real accounts
-(38 resources default, 62 with EKS + ElastiCache).
+ElastiCache and EKS in one VPC. The base is applied (38 resources) and Snowflake
+retrieval matches local exactly; EKS ran in a temporary session: Snowflake →
+ElastiCache in 67 s, in-cluster p99 30 ms at one client, 230 ms at eight on one
+small node, torn down and verified clean.
 → docs/phase-3.md "Local → cloud mapping", ADR 0013, 0019.
 
 **What would you do next?**
 Checkpointed, partitioned Flink with per-partition progress; Feast's Go feature
 server or multi-worker serving; offline-part compaction; Alertmanager routing;
-a feedback-aware simulator (or live traffic) for the A/B test; executing the
-cloud and Kubernetes paths.
+a feedback-aware simulator (or live traffic) for the A/B test; capacity for the
+EKS deployment (more replicas and nodes, autoscaling) so p99 holds under
+concurrency.
 
 **What went wrong along the way?**
 Each phase doc has a "Problems found and fixed" section: OOM from Feast's file

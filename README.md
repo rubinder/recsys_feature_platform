@@ -153,8 +153,10 @@ Details in [docs/phase-3.md](docs/phase-3.md).
 - **Failure signal:** with the clock moved 2.5 weeks ahead, batch freshness fails
   (17 days old vs an 8-day SLA); a failing blocking check provably stops
   downstream assets.
-- **Terraform** against real AWS + Snowflake: `plan` = 38 resources (46 with MSK
-  + ElastiCache), estimated ~$2/month by default. Not applied by automation.
+- **Terraform** against real AWS + Snowflake: 38 resources applied (~$2/month at
+  rest; MSK, ElastiCache, EKS opt-in). Snowflake point-in-time retrieval matches
+  the local store for 2,000 rows × 18 features, and Snowflake → Redis
+  materialization passes the parity check.
 
 ### Phase 5: the production loop
 
@@ -170,6 +172,11 @@ Details in [docs/phase-5.md](docs/phase-5.md).
 - **Monitoring:** p99 28.8 ms at 54 req/s (SLO 50 ms), 0% errors, 99.5% cache hit
   rate; drift and staleness alerts firing for real shifts (holiday returning users
   vs November sign-ups; batch features 28 days old after the replay).
+- **On real AWS** ([session write-up](docs/phase-5-eks-session.md), with videos):
+  EKS + ElastiCache up in 12.5 min, features loaded from Snowflake into
+  ElastiCache in 67 s, model served from S3; in-cluster p99 **30 ms** at one
+  client (SLO met), 230 ms at eight (one small node saturates); torn down and
+  verified clean after 30 minutes.
 
 <!-- BENCHMARKS:START -->
 

@@ -72,7 +72,9 @@ def run_of(version: str) -> str:
 
 
 def resolve(spec: str, fresh: bool = False) -> tuple[str, str | None]:
-    """'models:/recsys-ranker@alias' or a run id -> (run_id, registry version or None)."""
+    """'models:/recsys-ranker@alias', a run id, or an artifact URI (s3://.../model) -> (run id or URI, version)."""
+    if "://" in spec:  # direct artifact location: serving without a tracking server (EKS)
+        return spec, None
     if spec.startswith(PREFIX):
         v = alias_version(spec[len(PREFIX):], fresh=fresh)
         if v is None:

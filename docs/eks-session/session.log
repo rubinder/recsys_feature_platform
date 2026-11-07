@@ -1,0 +1,170 @@
+
+[1;36m# 1/7 Bring up EKS (ARM node group) + ElastiCache in the Phase 3 VPC[0m
+[1;32m$[0m terraform apply -var enable_eks=true -var enable_elasticache=true (Phase 3 base unchanged)
+module.aws.random_password.redis_auth[0]: Creation complete after 0s [id=none]
+module.aws.aws_iam_role.eks_cluster[0]: Creation complete after 0s [id=recsys-eks-cluster]
+module.aws.aws_iam_role.api_pods[0]: Creation complete after 0s [id=recsys-api-pods]
+module.aws.aws_iam_role.eks_node[0]: Creation complete after 0s [id=recsys-eks-node]
+module.aws.aws_iam_role_policy_attachment.api_pods[0]: Creation complete after 0s [id=recsys-api-pods/arn:aws:iam::<aws-account-id>:policy/recsys-app]
+module.aws.aws_iam_role_policy_attachment.eks_cluster[0]: Creation complete after 0s [id=recsys-eks-cluster/arn:aws:iam::aws:policy/AmazonEKSClusterPolicy]
+module.aws.aws_ecr_repository.api[0]: Creation complete after 0s [id=recsys-api]
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"]: Creation complete after 0s [id=recsys-eks-node/arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy]
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"]: Creation complete after 0s [id=recsys-eks-node/arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy]
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]: Creation complete after 0s [id=recsys-eks-node/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly]
+module.aws.aws_vpc.this[0]: Creation complete after 2s [id=vpc-0c2a699c30401de83]
+module.aws.aws_internet_gateway.this[0]: Creation complete after 0s [id=igw-0188a759515b06909]
+module.aws.aws_subnet.private[1]: Creation complete after 0s [id=subnet-00bd0a5a3bcfaa8b0]
+module.aws.aws_route_table.public[0]: Creation complete after 1s [id=rtb-00a974ccc43481884]
+module.aws.aws_security_group.data[0]: Creation complete after 2s [id=sg-0f4d1000bfa1ecff8]
+module.aws.aws_subnet.private[0]: Creation complete after 2s [id=subnet-0108aea7eff8b76bf]
+module.aws.aws_launch_template.nodes[0]: Creation complete after 5s [id=lt-027658c57fe332f16]
+module.aws.aws_elasticache_subnet_group.this[0]: Creation complete after 2s [id=recsys-redis]
+module.aws.aws_subnet.public[0]: Creation complete after 11s [id=subnet-09b0390cabefa5159]
+module.aws.aws_subnet.public[1]: Creation complete after 11s [id=subnet-0f1477a0632bbbadb]
+module.aws.aws_route_table_association.public[1]: Creation complete after 0s [id=rtbassoc-0faae9250ad37ca9f]
+module.aws.aws_route_table_association.public[0]: Creation complete after 0s [id=rtbassoc-01fbf501634b644fc]
+module.aws.aws_elasticache_replication_group.this[0]: Creation complete after 4m24s [id=recsys-online]
+module.aws.aws_eks_cluster.this[0]: Creation complete after 10m20s [id=recsys-eks]
+module.aws.aws_eks_access_entry.operator[0]: Creation complete after 1s [id=recsys-eks:arn:aws:iam::<aws-account-id>:user/deployer]
+module.aws.aws_security_group_rule.eks_to_data[0]: Creation complete after 1s [id=sgrule-1254847162]
+module.aws.aws_eks_access_policy_association.operator_admin[0]: Creation complete after 0s [id=recsys-eks#arn:aws:iam::<aws-account-id>:user/deployer#arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy]
+module.aws.aws_eks_addon.pod_identity[0]: Creation complete after 8s [id=recsys-eks:eks-pod-identity-agent]
+module.aws.aws_eks_pod_identity_association.api[0]: Creation complete after 1s [id=a-kgyuztkgvxkajlppr]
+module.aws.aws_eks_node_group.default[0]: Creation complete after 1m49s [id=recsys-eks:default]
+Apply complete! Resources: 30 added, 0 changed, 0 destroyed.
+
+[1;36m# 2/7 Build the API image (arm64) and push it to ECR[0m
+[1;32m$[0m docker build -t <ecr>/recsys-api:7d4880b .
+sha256:3efec34274cdf74ca8414923850a29e0b8979e0ab83ed594b1252114bda866a2
+[1;32m$[0m aws ecr get-login-password | docker login ... (ECR)
+Login Succeeded
+[1;32m$[0m docker push <ecr>/recsys-api:7d4880b
+<aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/recsys-api:7d4880b
+
+[1;36m# 3/7 Cluster access and the Feast registry in S3[0m
+[1;32m$[0m aws eks update-kubeconfig --name recsys-eks
+Updated context arn:aws:eks:us-east-1:<aws-account-id>:cluster/recsys-eks in /Users/robran/IdeaProjects/recsys_feature_platform/data/eks/kubeconfig
+[1;32m$[0m kubectl get nodes -o wide
+NAME                           STATUS   ROLES    AGE     VERSION               INTERNAL-IP    EXTERNAL-IP    OS-IMAGE                        KERNEL-VERSION                             CONTAINER-RUNTIME
+ip-10-40-10-151.ec2.internal   Ready    <none>   2m17s   v1.37.1-eks-6e7947a   10.40.10.151   52.90.232.97   Amazon Linux 2023.12.20261102   6.18.56-125.164.amzn2023.aarch64 (arm64)   containerd://2.3.7+unknown
+[1;32m$[0m RECSYS_PROFILE=cloud feast apply  (registry -> s3://<lake>/feast/)
+feast definitions applied
+
+[1;36m# 4/7 Secrets + config, then deploy: materialize Job (Snowflake -> ElastiCache) and the API[0m
+[1;32m$[0m kubectl apply -f -  (ConfigMap recsys-cloud, Secrets recsys-redis, recsys-snowflake-key)
+configmap/recsys-cloud created
+secret/recsys-redis created
+secret/recsys-snowflake-key created
+[1;32m$[0m helm template recsys deploy/helm/recsys -f values-eks.yaml | kubectl apply -f -
+serviceaccount/recsys created
+service/recsys-api created
+deployment.apps/recsys-api created
+job.batch/recsys-materialize created
+$ kubectl logs -f job/recsys-materialize  (Snowflake -> ElastiCache)
+  [recsys-materialize] Error from server (BadRequest): container "materialize" in pod "recsys-materialize-klwcj" is waiting to start: ContainerCreating
+  [recsys-materialize] materialized user_stats: 5998 entities
+  [recsys-materialize] materialized user_genre_affinity: 5998 entities
+  [recsys-materialize] materialized item_popularity: 3678 entities
+  [recsys-materialize] materialized item_stats: 3678 entities
+  [recsys-materialize] materialized user_stream: 5998 entities
+  [recsys-materialize] materialized features as of 2000-12-29T00:00:00+00:00 into Redis
+[1;32m$[0m kubectl rollout status deploy/recsys-api --timeout=10m
+deployment "recsys-api" successfully rolled out
+[1;32m$[0m kubectl get pods,svc -o wide
+NAME                              READY   STATUS      RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
+pod/recsys-api-86c7f854c6-m2nn9   1/1     Running     0          68s   10.40.10.184   ip-10-40-10-151.ec2.internal   <none>           <none>
+pod/recsys-api-86c7f854c6-nf4qx   1/1     Running     0          68s   10.40.10.102   ip-10-40-10-151.ec2.internal   <none>           <none>
+pod/recsys-materialize-klwcj      0/1     Completed   0          68s   10.40.10.249   ip-10-40-10-151.ec2.internal   <none>           <none>
+NAME                 TYPE           CLUSTER-IP      EXTERNAL-IP                                                              PORT(S)        AGE     SELECTOR
+service/kubernetes   ClusterIP      172.20.0.1      <none>                                                                   443/TCP        7m56s   <none>
+service/recsys-api   LoadBalancer   172.20.126.93   a80dcdc3d57c24625bb3adbbdfb99954-518461388.us-east-1.elb.amazonaws.com   80:30786/TCP   68s     app=recsys-api
+
+[1;36m# 5/7 Measure latency inside the VPC (in-cluster load test Job)[0m
+[1;32m$[0m kubectl apply -f loadtest-job  (3,000 requests from inside the cluster)
+job.batch/recsys-loadtest created
+  [recsys-loadtest] LOADTEST_RESULT {"runs": [{"concurrency": 1, "requests": 1500, "p50_ms": 19.885971000007885, "p95_ms": 24.07481000000189, "p99_ms": 30.163311000023896, "rps": 48.857433502420854}, {"concurrency": 8, "requests": 3000, "p50_ms": 85.90001400000347, "p95_ms": 154.0285430000381, "p99_ms": 230.53667099998165, "rps": 86.06300735221322}], "server_stages_ms": {"candidates": {"count": 3065, "mean_ms": 0.6892863869502568, "p50_ms": 0.25375299998131595, "p95_ms": 1.880620800011456, "p99_ms": 12.913258719997895}, "online_features": {"count": 3043, "mean_ms": 15.459358845875558, "p50_ms": 9.643478999976196, "p95_ms": 39.45001670003308, "p99_ms": 57.21903330000713}, "ranking": {"count": 3043, "mean_ms": 15.223240533683633, "p50_ms": 7.704697999997734, "p95_ms": 40.72881089998646, "p99_ms": 58.58257646000309}, "total": {"count": 3065, "mean_ms": 31.156698215661304, "p50_ms": 18.753885999984732, "p95_ms": 72.00978500002284, "p99_ms": 97.19790012002933}}}
+  in-cluster c=1: p50 19.9 ms  p95 24.1 ms  p99 30.2 ms  49 req/s
+  in-cluster c=8: p50 85.9 ms  p95 154.0 ms  p99 230.5 ms  86 req/s
+
+[1;36m# 6/7 Public endpoint (load balancer, restricted to this machine's IP)[0m
+[1;32m$[0m curl http://<elb>/health
+{"status":"ok","default_variant":"champion","variants":{"champion":"s3://recsys-mlflow-<aws-account-id>/artifacts/4beeb3e53e1446738e9309eac96219a1/artifacts/model"},"registry_versions":{},"model_version":"s3://recsys-mlflow-<aws-account-id>/artifacts/4beeb3e53e1446738e9309eac96219a1/artifacts/model","experiment":"exp-streaming-features-001"}
+[1;32m$[0m curl http://<elb>/recommendations/6040
+{
+    "request_id": "aae3aafa0ec1402c933c402453c13d63",
+    "user_id": 6040,
+    "variant": "control",
+    "model": "champion",
+    "experiment_id": "exp-streaming-features-001",
+    "model_version": "s3://recsys-mlflow-<aws-account-id>/artifacts/4beeb3e53e1446738e9309eac96219a1/artifacts/model",
+    "features_as_of": "2000-12-29T00:00:00+00:00",
+    "strategy": "two_stage",
+    "items": [
+        {
+            "item_id": 1270,
+            "score": 0.27217558572040057,
+            "als_score": 0.89732825756073
+        },
+        {
+            "item_id": 2571,
+            "score": 0.2542446344335273,
+            "als_score": 0.6950710415840149
+        },
+        {
+            "item_id": 457,
+            "score": 0.2051349774142639,
+            "als_score": 0.5726029872894287
+        },
+        {
+            "item_id": 2916,
+            "score": 0.18967399955655834,
+            "als_score": 0.5685646533966064
+        },
+
+[1;36m# Endpoint stays up 8 min for screen captures[0m
+
+[1;36m# 7/7 Tear down EKS + ElastiCache (always runs), keep the Phase 3 base[0m
+[1;32m$[0m kubectl delete svc recsys-api  (removes the AWS load balancer first)
+service "recsys-api" deleted from default namespace
+[1;32m$[0m terraform apply -var enable_eks=false -var enable_elasticache=false (Phase 3 base unchanged)
+module.aws.aws_iam_role_policy_attachment.api_pods[0]: Destruction complete after 1s
+module.aws.aws_ecr_repository.api[0]: Destruction complete after 1s
+module.aws.aws_route_table_association.public[0]: Destruction complete after 1s
+module.aws.aws_route_table_association.public[1]: Destruction complete after 1s
+module.aws.aws_eks_access_policy_association.operator_admin[0]: Destruction complete after 1s
+module.aws.aws_eks_pod_identity_association.api[0]: Destruction complete after 1s
+module.aws.aws_security_group_rule.eks_to_data[0]: Destruction complete after 1s
+module.aws.aws_iam_role.api_pods[0]: Destruction complete after 0s
+module.aws.aws_route_table.public[0]: Destruction complete after 0s
+module.aws.aws_eks_access_entry.operator[0]: Destruction complete after 0s
+module.aws.aws_eks_addon.pod_identity[0]: Destruction complete after 1s
+module.aws.aws_elasticache_replication_group.this[0]: Destruction complete after 4m26s
+module.aws.random_password.redis_auth[0]: Destruction complete after 0s
+module.aws.aws_elasticache_subnet_group.this[0]: Destruction complete after 0s
+module.aws.aws_security_group.data[0]: Destruction complete after 1s
+module.aws.aws_internet_gateway.this[0]: Destruction complete after 6m31s
+module.aws.aws_eks_node_group.default[0]: Destruction complete after 8m13s
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"]: Destruction complete after 0s
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"]: Destruction complete after 0s
+module.aws.aws_iam_role_policy_attachment.eks_node["arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"]: Destruction complete after 0s
+module.aws.aws_launch_template.nodes[0]: Destruction complete after 0s
+module.aws.aws_iam_role.eks_node[0]: Destruction complete after 0s
+module.aws.aws_eks_cluster.this[0]: Destruction complete after 2m39s
+module.aws.aws_iam_role_policy_attachment.eks_cluster[0]: Destruction complete after 0s
+module.aws.aws_iam_role.eks_cluster[0]: Destruction complete after 0s
+module.aws.aws_subnet.private[0]: Destruction complete after 1s
+module.aws.aws_subnet.private[1]: Destruction complete after 1s
+module.aws.aws_subnet.public[1]: Destruction complete after 1s
+module.aws.aws_subnet.public[0]: Destruction complete after 1s
+module.aws.aws_vpc.this[0]: Destruction complete after 0s
+Apply complete! Resources: 0 added, 0 changed, 30 destroyed.
+
+[1;36m# Verify nothing billable from the session remains[0m
+[1;32m$[0m aws eks list-clusters --query "clusters[?contains(@, 'recsys')]" --output text
+[1;32m$[0m aws elasticache describe-replication-groups --query "ReplicationGroups[?contains(ReplicationGroupId, 'recsys')].ReplicationGroupId" --output text
+[1;32m$[0m aws ec2 describe-instances --filters Name=instance-state-name,Values=running,pending Name=tag:eks:cluster-name,Values=recsys-eks --query 'Reservations[].Instances[].InstanceId' --output text
+[1;32m$[0m aws resourcegroupstaggingapi get-resources --resource-type-filters elasticloadbalancing:loadbalancer --tag-filters Key=kubernetes.io/cluster/recsys-eks --query 'ResourceTagMappingList[].ResourceARN' --output text
+[1;32m$[0m aws ecr describe-repositories --query "repositories[?repositoryName=='recsys-api'].repositoryName" --output text
+
+leftover billable resources: none
+session wall time 29.6 min

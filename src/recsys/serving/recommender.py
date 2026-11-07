@@ -79,7 +79,10 @@ class ModelBundle:
     def __init__(self, name: str, run_id: str, registry_version: str | None = None) -> None:
         self.name, self.run_id, self.registry_version = name, run_id, registry_version
         d = Path(tempfile.mkdtemp(prefix=f"recsys-{name}-"))
-        path = Path(mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model", dst_path=str(d)))
+        if "://" in run_id:  # artifact URI of the model directory (e.g. s3://<mlflow bucket>/.../artifacts/model)
+            path = Path(mlflow.artifacts.download_artifacts(artifact_uri=run_id, dst_path=str(d)))
+        else:
+            path = Path(mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model", dst_path=str(d)))
         self.als: ALSModel = ALSModel.load(path / "als.npz")
         self.booster = ranker.load(path / "ranker.txt")
         self.manifest = json.loads((path / "manifest.json").read_text())

@@ -1,6 +1,6 @@
 # 0019: Optional deployment paths: kind + Helm, and EKS
 
-- Status: accepted (not executed; see docs/phase-5.md)
+- Status: accepted (EKS executed in a temporary session, docs/phase-5-eks-session.md; kind not run)
 - Phase: 5
 
 ## Decision
@@ -22,6 +22,9 @@
   cloud account.
 
 ## Consequences
-- `terraform plan` with EKS + ElastiCache enabled resolves to 62 resources
-  against the real account. The Helm chart and Locust test have not been run
-  (kind and Helm were not installed on the build machine).
+- The EKS path ran for real: 30 resources up in 12.5 min, Snowflake →
+  ElastiCache in 67 s, in-cluster p99 30 ms at one client (SLO met) and 230 ms
+  at eight (saturated), torn down and verified clean. It needed an explicit
+  EKS access entry, `fsGroup` for root-owned secret files, ARM nodes, and
+  self-refreshing AWS credentials (exported `aws login` credentials expire in
+  ~15 minutes, shorter than an EKS apply).

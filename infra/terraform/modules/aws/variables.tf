@@ -45,3 +45,8 @@ variable "eks_public_access_cidrs" {
   type        = list(string)
   default     = []
 }
+variable "eks_admin_principal_arn" {
+  description = "IAM principal granted cluster-admin on the EKS cluster (the operator)."
+  type        = string
+  default     = ""
+}

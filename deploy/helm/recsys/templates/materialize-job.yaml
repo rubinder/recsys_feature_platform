@@ -3,22 +3,38 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ .Release.Name }}-materialize
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 4
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: OnFailure
-      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      serviceAccountName: recsys
+      # fsGroup: secret files are root-owned; group 10001 + mode 0440 lets the non-root user read the key
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: materialize
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
           command: ["python", "-m", "recsys.features.materialize"]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
           env:
             {{- include "recsys.env" . | nindent 12 }}
-          {{- include "recsys.mounts" . | nindent 10 }}
-      {{- include "recsys.volumes" . | nindent 6 }}
+          {{- include "recsys.envFrom" . | nindent 10 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.cloud.enabled }}
+            - {name: snowflake-key, mountPath: /secrets/snowflake, readOnly: true}
+            {{- end }}
+            {{- if .Values.hostRoot }}
+            - {name: data, mountPath: /app/data}
+            {{- end }}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        {{- if .Values.cloud.enabled }}
+        - name: snowflake-key
+          secret: {secretName: {{ .Values.cloud.snowflakeKeySecret | quote }}, defaultMode: 0440}
+        {{- end }}
+        {{- if .Values.hostRoot }}
+        - {name: data, hostPath: {path: "{{ .Values.hostRoot }}/data", type: Directory}}
+        {{- end }}
 {{- end }}

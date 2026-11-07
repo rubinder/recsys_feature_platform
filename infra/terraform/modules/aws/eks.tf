@@ -1,6 +1,7 @@
 # Optional (enable_eks): EKS cluster + managed node group + ECR, reusing the VPC
 # that MSK / ElastiCache live in, so the serving API can reach ElastiCache.
-# ~$110/month while it exists (control plane $73 + one t3.medium + public IPv4).
+# ~$105/month while it exists (control plane $73 + one t4g.medium + public IPv4);
+# ARM (Graviton) nodes so images built on Apple Silicon run natively.
 # Nodes run in public subnets (no NAT gateway cost) with a restricted API endpoint.
 
 resource "aws_internet_gateway" "this" {
@@ -76,7 +77,10 @@ resource "aws_eks_cluster" "this" {
     endpoint_private_access = true
     public_access_cidrs     = length(var.eks_public_access_cidrs) > 0 ? var.eks_public_access_cidrs : null
   }
-  access_config { authentication_mode = "API" }
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = false # granted explicitly below
+  }
   depends_on = [aws_iam_role_policy_attachment.eks_cluster]
 }
 
@@ -162,7 +166,8 @@ resource "aws_eks_node_group" "default" {
   node_group_name = "default"
   node_role_arn   = aws_iam_role.eks_node[0].arn
   subnet_ids      = aws_subnet.public[*].id
-  instance_types  = ["t3.medium"]
+  ami_type        = "AL2023_ARM_64_STANDARD"
+  instance_types  = ["t4g.medium"]
   launch_template {
     id      = aws_launch_template.nodes[0].id
     version = aws_launch_template.nodes[0].latest_version
@@ -184,4 +189,21 @@ resource "aws_security_group_rule" "eks_to_data" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.data[0].id
   source_security_group_id = aws_eks_cluster.this[0].vpc_config[0].cluster_security_group_id
+}
+
+# Explicit cluster-admin access for the operator (the identity running Terraform),
+# instead of relying on implicit creator permissions.
+resource "aws_eks_access_entry" "operator" {
+  count         = var.enable_eks ? 1 : 0
+  cluster_name  = aws_eks_cluster.this[0].name
+  principal_arn = var.eks_admin_principal_arn
+}
+
+resource "aws_eks_access_policy_association" "operator_admin" {
+  count         = var.enable_eks ? 1 : 0
+  cluster_name  = aws_eks_cluster.this[0].name
+  principal_arn = var.eks_admin_principal_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  access_scope { type = "cluster" }
+  depends_on = [aws_eks_access_entry.operator]
 }

@@ -120,12 +120,17 @@ make terraform-destroy     # when done
 
 ## Limitations
 
-- **The cloud path has not been executed end to end.** `terraform plan` ran
-  against both real accounts (authentication and configuration verified), and
-  the cloud profile's configuration is unit-tested, but `terraform apply` and
-  `make demo-snowflake` have not been run because they create billable
-  resources. Expect first-run adjustments in `demo-snowflake` around how
-  Snowflake infers Parquet timestamp and array types.
+- **Update: the cloud path has since been executed** against the real
+  accounts. `terraform apply` created the state bucket and all 38 resources;
+  `make demo-snowflake` loaded the five feature tables (row counts identical
+  to local), point-in-time retrieval from Snowflake matched local DuckDB for
+  2,000 rows × 18 features, and materializing from Snowflake into Redis passed
+  the parity check. Three real-account fixes were needed: a USAGE grant on the
+  Parquet file format, normalizing Snowflake ARRAY columns (returned as JSON
+  text), and `convert_timestamp_columns=False` (Feast emitted an unquoted
+  timestamp column). A ranker trained under the cloud profile (features from
+  Snowflake, artifacts in S3) scored like the local one (test NDCG@10 0.221 vs
+  0.220).
 - One environment (`dev`); a `prod` env would be a second `envs/` directory with
   its own state key.
 - The Dagster instance is local (SQLite in `data/dagster`); production would use

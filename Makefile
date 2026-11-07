@@ -3,7 +3,7 @@
         snowflake-keys terraform-bootstrap terraform-init terraform-plan terraform-apply terraform-destroy \
         terraform-outputs demo-snowflake benchmarks benchmarks-report \
         registry-up registry-bootstrap registry-status monitor-up experiment lift retrain retrain-bad promote \
-        rollback demo-production-loop k8s-deploy loadtest eks-plan eks-apply eks-destroy \
+        rollback demo-production-loop k8s-deploy loadtest eks-plan eks-apply eks-destroy eks-session \
         stream-up stream-down flink-ui stream-reset backfill-streaming flink-features produce simulate metrics stream-parity demo-streaming
 RUN := uv run
 # Bearer token for the API's /admin routes: generated once, gitignored, exported to
@@ -181,6 +181,11 @@ eks-apply: ## EKS=1, YOU run this: applies the saved EKS plan
 	@[ "$(EKS)" = "1" ] || ( echo "optional, billable path: run with EKS=1"; exit 1 )
 	@$(SF_ENV) && cd $(TF_MAIN) && terraform apply tfplan-eks
 
+MODEL_URI ?=
+eks-session: ## temporary EKS session: up, deploy, measure, capture, ALWAYS tear down (MODEL_URI=s3://.../model)
+	@[ -n "$(MODEL_URI)" ] || ( echo "set MODEL_URI to an s3:// model directory trained under RECSYS_PROFILE=cloud"; exit 1 )
+	$(RUN) python scripts/eks_session.py --model-uri $(MODEL_URI)
+
 eks-destroy: terraform-init ## EKS=1: remove EKS + ElastiCache again (keeps the rest of envs/main)
 	@[ "$(EKS)" = "1" ] || ( echo "run with EKS=1"; exit 1 )
 	@$(SF_ENV) && cd $(TF_MAIN) && terraform apply -input=false $(TF_KEY) -var enable_eks=false -var enable_elasticache=false
@@ -198,7 +203,7 @@ demo-production-loop: ## after demo-streaming: registry, A/B experiment, retrain
 TF_MAIN := infra/terraform/envs/main
 TF_BOOT := infra/terraform/bootstrap
 # AWS: export the CLI session (works with `aws login` / SSO, which Terraform's S3 backend can't read directly).
-SF_ENV := eval "$$(aws configure export-credentials --format env 2>/dev/null)" && eval "$$(uv run python scripts/snowflake_env.py)"
+SF_ENV := eval "$$(uv run python scripts/aws_profile_env.py)" && eval "$$(uv run python scripts/snowflake_env.py)"
 TF_KEY := -var "feast_rsa_public_key=$$(grep -v -- '-----' $(CURDIR)/.secrets/feast_rsa_key.pub | tr -d '\n')"
 
 snowflake-keys: ## key pair for the Feast service user (.secrets/, gitignored)
@@ -217,8 +222,8 @@ terraform-bootstrap: ## ONE-TIME: creates the S3 state bucket (asks to confirm),
 
 terraform-init:
 	@$(RUN) python scripts/tf_backend.py auto
-	@cd $(TF_MAIN) && if [ -f backend.hcl ]; then terraform init -input=false -backend-config=backend.hcl >/dev/null; \
-	  else terraform init -input=false >/dev/null; fi
+	@eval "$$(uv run python scripts/aws_profile_env.py)" && cd $(TF_MAIN) && if [ -f backend.hcl ]; then \
+	  terraform init -input=false -backend-config=backend.hcl >/dev/null; else terraform init -input=false >/dev/null; fi
 
 terraform-plan: snowflake-keys terraform-init ## read-only plan against the real accounts; saves tfplan
 	@[ -f $(TF_MAIN)/terraform.tfvars ] || [ -n "$$TF_VAR_alert_email" ] || ( echo "Set the budget alert email first:"; \
@@ -233,7 +238,8 @@ terraform-destroy: terraform-init ## tears down everything in envs/main (asks to
 	@$(SF_ENV) && cd $(TF_MAIN) && terraform destroy -input=false $(TF_KEY)
 
 terraform-outputs: ## write .env.cloud (bucket + Snowflake object names) for the cloud profile
-	@cd $(TF_MAIN) && terraform output -json | uv run python $(CURDIR)/scripts/write_cloud_env.py > $(CURDIR)/.env.cloud
+	@eval "$$(uv run python scripts/aws_profile_env.py)" && cd $(TF_MAIN) && terraform output -json \
+	  | uv run python $(CURDIR)/scripts/write_cloud_env.py > $(CURDIR)/.env.cloud
 	@echo "wrote .env.cloud"
 
 demo-snowflake: ## after terraform-apply: load features into Snowflake, compare PIT retrieval with local

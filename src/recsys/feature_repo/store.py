@@ -34,10 +34,12 @@ def repo_config() -> RepoConfig:
     from recsys.cloud import profile
 
     registry = "registry.db" if profile() == "local" else f"registry_{profile()}.db"
+    # RECSYS_FEAST_REGISTRY (e.g. s3://<lake>/feast/registry_cloud.db) shares the registry with pods in the cluster.
+    registry_path = os.environ.get("RECSYS_FEAST_REGISTRY") or str(DATA / "feast" / registry)
     return RepoConfig(
         project="recsys",
         provider="local",
-        registry={"path": str(DATA / "feast" / registry), "cache_ttl_seconds": 600},
+        registry={"path": registry_path, "cache_ttl_seconds": 600},
         offline_store=offline_store_config(),
         online_store={"type": "redis", "connection_string": os.environ.get("REDIS_CONNECTION", "localhost:6379")},
         entity_key_serialization_version=3,
@@ -47,7 +49,8 @@ def repo_config() -> RepoConfig:
 
 @lru_cache(maxsize=1)
 def get_store() -> FeatureStore:
-    (DATA / "feast").mkdir(parents=True, exist_ok=True)
+    if not os.environ.get("RECSYS_FEAST_REGISTRY"):
+        (DATA / "feast").mkdir(parents=True, exist_ok=True)
     return FeatureStore(config=repo_config())
 
 

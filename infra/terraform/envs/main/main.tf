@@ -55,6 +55,7 @@ module "aws" {
   enable_elasticache      = var.enable_elasticache
   enable_eks              = var.enable_eks
   eks_public_access_cidrs = var.eks_public_access_cidrs
+  eks_admin_principal_arn = data.aws_caller_identity.me.arn
 }
 
 module "snowflake" {

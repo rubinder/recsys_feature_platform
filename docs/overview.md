@@ -47,14 +47,16 @@ off-the-shelf two-stage model, on MovieLens 1M with a dataset-agnostic schema.
 | Ablation | popularity: most accuracy, least diversity; session features: improve both |
 | A/B test (565 users) | same direction, **inconclusive** (p = 0.43): paired offline evaluation is far more powerful than a small live test |
 | Promotion gate | good challenger promoted, shuffled-label challenger rejected, rollback in one command |
+| Snowflake offline store | point-in-time retrieval identical to local for 2,000 rows × 18 features |
+| EKS session | in-cluster p99 30 ms at one client (SLO met), 230 ms at eight; up 12.5 min, verified torn down |
 
 ## Limitations
 
 - Outcomes are simulated by replaying real future behaviour (counterfactual,
   no feedback loop); every report says so.
-- Cloud resources are planned against real accounts (38 resources; 46 with
-  MSK + ElastiCache; 62 with EKS) but not applied; the Snowflake demo and the
-  Kubernetes paths have not been executed.
+- The cloud base (38 resources) is applied and verified against Snowflake; EKS
+  ran in a temporary 30-minute session and was torn down. MSK and the local
+  kind path have not been run.
 - Single-node Flink without checkpointing; local Dagster and MLflow storage.
 - Small dataset: the ranker trains on hundreds of queries, so some effects need
   cross-validation to be measurable.

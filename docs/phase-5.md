@@ -116,9 +116,11 @@ rejected, rollback v3 → v1, with identical gate statistics.)
 - The gate's held-out set is the validation period that also drove early
   stopping; it is shared by both models (fair) but optimistic in absolute terms.
 - Alertmanager routing (pager, Slack) is not configured.
-- **Not executed:** the K8S path (kind and Helm were not installed) and the EKS
-  path (billable; `terraform plan` with EKS + ElastiCache resolves to 62
-  resources). Both are flag-gated and documented in ADR 0019.
+- **EKS was executed** in a temporary session (bring-up, deploy, in-cluster
+  load test, captures, teardown verified clean): see
+  [phase-5-eks-session.md](phase-5-eks-session.md). The local kind path has
+  not been run (kind and Helm not installed; the chart renders and lints via
+  the Helm container).
 - MLflow's tracking server shares the SQLite store with the host tools; a
   production setup would use Postgres and S3 (the cloud profile already sends
   artifacts to S3).

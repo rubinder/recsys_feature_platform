@@ -9,6 +9,7 @@ adminTokenSecret: ""    # name of a Secret with key `token` for /admin routes; e
 
 api:
   defaultVariant: champion
+  modelVariants: ""      # empty: discover from the mounted MLflow store (kind)
   featureCacheTtlS: 300
   resources:
     requests: {cpu: 500m, memory: 1Gi}
@@ -17,10 +18,17 @@ api:
 service:
   type: NodePort        # kind maps nodePort 30080 -> localhost:8080; use LoadBalancer on EKS
   nodePort: 30080
+  sourceRanges: []
 
 redis:
-  enabled: true         # in-cluster Redis (kind). On EKS set false and point at ElastiCache:
-  external: ""          # e.g. "<primary-endpoint>:6379,ssl=true,password=<auth token>"
+  enabled: true         # in-cluster Redis (kind). On EKS: false + externalSecret (ElastiCache)
+  external: ""
+  externalSecret: ""
+
+cloud:
+  enabled: false
+  configMap: ""
+  snowflakeKeySecret: ""
 
 materialize:
   enabled: true         # post-install Job: Feast materialize into the in-cluster Redis

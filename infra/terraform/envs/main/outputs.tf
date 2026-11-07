@@ -10,3 +10,7 @@ output "msk_bootstrap_brokers_iam" { value = module.aws.msk_bootstrap_brokers_ia
 output "redis_endpoint" { value = module.aws.redis_endpoint }
 output "eks_cluster_name" { value = module.aws.eks_cluster_name }
 output "ecr_repository_url" { value = module.aws.ecr_repository_url }
+output "redis_auth_token" {
+  value     = module.aws.redis_auth_token
+  sensitive = true
+}
