@@ -11,9 +11,11 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: materialize
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}}
           command: ["python", "-m", "recsys.features.materialize"]
           env:
             {{- include "recsys.env" . | nindent 12 }}

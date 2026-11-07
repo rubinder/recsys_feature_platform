@@ -113,7 +113,7 @@ class Recommender:
             if not spec.startswith(registry.PREFIX):
                 continue
             try:
-                run_id, version = registry.resolve(spec)
+                run_id, version = registry.resolve(spec, fresh=True)
             except LookupError:  # alias removed (e.g. challenger rejected): stop serving it
                 if name in self.models and name != self.default_variant:
                     self.models = {k: v for k, v in self.models.items() if k != name}

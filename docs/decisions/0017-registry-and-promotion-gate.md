@@ -20,8 +20,10 @@
   previous champion and tags the bad version `rolled-back`.
 - **Serving follows the registry without a restart:** variants may be alias
   specs (`models:/recsys-ranker@champion`); the API re-resolves them on
-  `POST /admin/reload` (called by promote/rollback) and every 30 s, swapping the
-  model bundle atomically.
+  `POST /admin/reload` (called by promote/rollback; bearer-token protected,
+  disabled without a token) and every 30 s, swapping the model bundle
+  atomically. Reload drops pooled registry DB connections so it never reads a
+  stale snapshot.
 - **Continuous training:** Dagster `retrain_and_promote` (challenger → gate →
   promote/reject); an asset sensor runs it whenever `batch_features` is
   re-materialized.

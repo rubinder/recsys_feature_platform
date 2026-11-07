@@ -106,10 +106,54 @@ resource "aws_iam_role_policy_attachment" "eks_node" {
   policy_arn = each.value
 }
 
-resource "aws_iam_role_policy_attachment" "eks_node_app" {
+# Lake + MLflow access is granted to the API's pods only (service account
+# recsys/recsys) via EKS Pod Identity, never to the node role, so other pods on
+# the node cannot use it. IMDSv2 with hop limit 1 keeps pods off the node role.
+resource "aws_eks_addon" "pod_identity" {
+  count        = var.enable_eks ? 1 : 0
+  cluster_name = aws_eks_cluster.this[0].name
+  addon_name   = "eks-pod-identity-agent"
+}
+
+data "aws_iam_policy_document" "pod_identity_trust" {
+  statement {
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "api_pods" {
+  count              = var.enable_eks ? 1 : 0
+  name               = "${var.prefix}-api-pods"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "api_pods" {
   count      = var.enable_eks ? 1 : 0
-  role       = aws_iam_role.eks_node[0].name
-  policy_arn = aws_iam_policy.app.arn # lake + MLflow artifacts
+  role       = aws_iam_role.api_pods[0].name
+  policy_arn = aws_iam_policy.app.arn
+}
+
+resource "aws_eks_pod_identity_association" "api" {
+  count           = var.enable_eks ? 1 : 0
+  cluster_name    = aws_eks_cluster.this[0].name
+  namespace       = "default"
+  service_account = "recsys"
+  role_arn        = aws_iam_role.api_pods[0].arn
+  depends_on      = [aws_eks_addon.pod_identity]
+}
+
+resource "aws_launch_template" "nodes" {
+  count = var.enable_eks ? 1 : 0
+  name  = "${var.prefix}-eks-nodes"
+  metadata_options {
+    http_tokens                 = "required" # IMDSv2 only
+    http_put_response_hop_limit = 1          # pods cannot reach the node's instance credentials
+    http_endpoint               = "enabled"
+  }
 }
 
 resource "aws_eks_node_group" "default" {
@@ -119,6 +163,10 @@ resource "aws_eks_node_group" "default" {
   node_role_arn   = aws_iam_role.eks_node[0].arn
   subnet_ids      = aws_subnet.public[*].id
   instance_types  = ["t3.medium"]
+  launch_template {
+    id      = aws_launch_template.nodes[0].id
+    version = aws_launch_template.nodes[0].latest_version
+  }
   scaling_config {
     desired_size = 1
     min_size     = 1

@@ -27,7 +27,8 @@ def experiment() -> tuple[str, str]:
 
 
 def setup() -> None:
-    MLRUNS.mkdir(parents=True, exist_ok=True)
+    if "MLFLOW_TRACKING_URI" not in os.environ:  # default local store; containers mount theirs and run read-mostly
+        MLRUNS.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(tracking_uri())
     name, location = experiment()
     if mlflow.get_experiment_by_name(name) is None:

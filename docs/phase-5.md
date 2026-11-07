@@ -94,7 +94,19 @@ rejected, rollback v3 → v1, with identical gate statistics.)
 4. **"No data" error rate** when nothing fails: `or vector(0)` in the panel and alert.
 5. **The gate failed inside Dagster** because the Phase 4 comparison module was
    only importable from the repo root; `benchmarks` is now part of the package.
-6. **Network outage mid-phase** (GitHub, including ghcr.io, unreachable): the
+6. **Serving read a stale registry.** The API's pooled SQLite connection kept an
+   old snapshot, so `/admin/reload` missed an alias another process had just
+   moved (the 30 s poll eventually caught up). Reload now drops pooled
+   connections first and accepts the expected versions, retrying until it sees
+   them; promote and rollback take effect immediately.
+7. **Security review findings, fixed:** `/admin/reload` now requires a bearer
+   token (generated into `.secrets/`, exported by the Makefile; disabled when
+   unset); the image runs as uid 10001 and the Helm pod as non-root with a
+   read-only root filesystem, no privilege escalation, all capabilities dropped
+   and `mlruns` mounted read-only; on EKS, lake/MLflow access moved from the node
+   role to a pod-scoped role via EKS Pod Identity, with IMDSv2 (hop limit 1) so
+   pods cannot use the node's credentials.
+8. **Network outage mid-phase** (GitHub, including ghcr.io, unreachable): the
    Dockerfile now installs `uv` from PyPI instead of copying it from ghcr.io.
 
 ## Limitations

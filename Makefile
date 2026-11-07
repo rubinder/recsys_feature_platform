@@ -6,6 +6,12 @@
         rollback demo-production-loop k8s-deploy loadtest eks-plan eks-apply eks-destroy \
         stream-up stream-down flink-ui stream-reset backfill-streaming flink-features produce simulate metrics stream-parity demo-streaming
 RUN := uv run
+# Bearer token for the API's /admin routes: generated once, gitignored, exported to
+# docker compose (API) and to the registry CLI (promote / rollback notifications).
+ADMIN_TOKEN_FILE := $(CURDIR)/.secrets/admin_token
+$(shell [ -s $(ADMIN_TOKEN_FILE) ] || ( mkdir -p $(CURDIR)/.secrets && chmod 700 $(CURDIR)/.secrets \
+  && openssl rand -hex 32 > $(ADMIN_TOKEN_FILE) && chmod 600 $(ADMIN_TOKEN_FILE) ))
+export RECSYS_ADMIN_TOKEN := $(shell cat $(ADMIN_TOKEN_FILE))
 DAGSTER_HOME := $(CURDIR)/data/dagster
 DAGSTER := mkdir -p $(DAGSTER_HOME) && touch $(DAGSTER_HOME)/dagster.yaml && DAGSTER_HOME=$(DAGSTER_HOME) uv run dagster
 DEFS := -m recsys.orchestration.definitions

@@ -25,9 +25,17 @@ API = "http://localhost:8000"
 
 
 def _notify_serving() -> None:
+    import os
+
+    token = os.environ.get("RECSYS_ADMIN_TOKEN", "")
+    expect = ",".join(f"{a}={registry.alias_version(a) or ''}" for a in ("champion", "challenger"))
     try:
-        r = httpx.post(f"{API}/admin/reload", timeout=120).json()
-        print("serving reloaded:", r)
+        resp = httpx.post(f"{API}/admin/reload", params={"expect": expect}, timeout=120,
+                          headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code != 200:
+            print(f"serving reload refused ({resp.status_code}); it picks up the change on its next 30 s poll")
+            return
+        print("serving reloaded:", resp.json())
     except httpx.HTTPError:
         print("serving not reachable; it picks up the change on its next 30 s poll or restart")
 

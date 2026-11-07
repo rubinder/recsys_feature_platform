@@ -22,6 +22,7 @@ services:
       DEFAULT_VARIANT: ${DEFAULT_VARIANT:-champion}  # falls back to the first variant without a registry
       FEATURE_CACHE: ${FEATURE_CACHE:-on}
       FEATURE_CACHE_TTL_S: ${FEATURE_CACHE_TTL_S:-300}
+      RECSYS_ADMIN_TOKEN: ${RECSYS_ADMIN_TOKEN:-}  # set by the Makefile from .secrets/admin_token; empty disables /admin
     ports: ["127.0.0.1:8000:8000"]
     volumes:
       - ./data:/app/data

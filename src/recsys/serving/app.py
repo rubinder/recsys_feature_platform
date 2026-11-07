@@ -10,10 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from prometheus_client import make_asgi_app
 
 from recsys.experiments.assignment import active_experiment
@@ -138,9 +139,32 @@ def recommendations(
     }
 
 
-@app.post("/admin/reload")
-def admin_reload() -> dict:
-    changed = STATE["rec"].reload()
+def require_admin(authorization: str | None = Header(default=None)) -> None:
+    """Admin routes need `Authorization: Bearer <RECSYS_ADMIN_TOKEN>`; without a configured token they are disabled
+    (serving still follows the registry through its periodic poll)."""
+    token = os.environ.get("RECSYS_ADMIN_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=403, detail="admin API disabled (RECSYS_ADMIN_TOKEN not set)")
+    supplied = (authorization or "").removeprefix("Bearer ").strip()
+    if not secrets.compare_digest(supplied.encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="invalid admin token")
+
+
+@app.post("/admin/reload", dependencies=[Depends(require_admin)])
+def admin_reload(expect: str | None = Query(default=None, description="e.g. champion=3,challenger= (empty = removed)")) -> dict:
+    """Re-resolve registry aliases. With `expect`, retry until the API sees those versions (up to 15 s):
+    the registry is a file the caller just wrote, and bind-mounted files can reach the container late."""
+    import time
+
+    want = dict(kv.split("=", 1) for kv in expect.split(",")) if expect else {}
+    changed: dict = {}
+    for _ in range(30):
+        changed.update(STATE["rec"].reload())
+        models = STATE["rec"].models
+        seen = {k: str(models[k].registry_version) if k in models else "" for k in want}
+        if seen == want:
+            break
+        time.sleep(0.5)
     _publish_models(STATE["rec"])
     return {"changed": changed, "variants": {k: m.registry_version or m.run_id[:8] for k, m in STATE["rec"].models.items()}}
 

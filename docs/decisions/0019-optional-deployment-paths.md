@@ -12,8 +12,9 @@
 - **EKS=1:** Terraform in the Phase 3 AWS module adds ECR, an EKS cluster
   (API authentication mode, endpoint restricted to `eks_public_access_cidrs`),
   one t3.medium managed node group in public subnets of the same VPC (no NAT
-  gateway), node access to the lake/MLflow buckets, and a security-group rule to
-  ElastiCache. The same chart deploys with `redis.enabled=false` and
+  gateway, IMDSv2 with hop limit 1), lake/MLflow access for the API's service
+  account only (EKS Pod Identity, not the node role), and a security-group rule
+  to ElastiCache. Pods run as non-root with a read-only root filesystem. The same chart deploys with `redis.enabled=false` and
   `redis.external` pointing at ElastiCache (TLS + AUTH). `make eks-plan` is
   read-only; `eks-apply` is run by a person; `eks-destroy` turns it off again.
   Estimated ~$120/month with ElastiCache while it exists.

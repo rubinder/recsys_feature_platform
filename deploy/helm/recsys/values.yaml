@@ -5,6 +5,7 @@ image:
 
 replicas: 2
 hostRoot: ""            # absolute repo path (kind); empty on EKS (artifacts come from S3)
+adminTokenSecret: ""    # name of a Secret with key `token` for /admin routes; empty = admin API disabled
 
 api:
   defaultVariant: champion

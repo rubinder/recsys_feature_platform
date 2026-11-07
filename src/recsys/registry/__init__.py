@@ -48,9 +48,21 @@ def register(run_id: str, tags: dict | None = None) -> str:
     return v.version
 
 
-def alias_version(alias: str) -> str | None:
+def fresh_client() -> MlflowClient:
+    """A client whose registry store drops pooled DB connections first. A long-lived
+    process (the API) can otherwise keep reading a stale SQLite snapshot and miss an
+    alias another process just moved."""
+    c = client()
     try:
-        return client().get_model_version_by_alias(MODEL, alias).version
+        c._get_registry_client().store.engine.dispose()
+    except Exception:  # non-SQL stores (e.g. an MLflow server URI) have no engine
+        pass
+    return c
+
+
+def alias_version(alias: str, fresh: bool = False) -> str | None:
+    try:
+        return (fresh_client() if fresh else client()).get_model_version_by_alias(MODEL, alias).version
     except MlflowException:
         return None
 
@@ -59,10 +71,10 @@ def run_of(version: str) -> str:
     return client().get_model_version(MODEL, version).run_id
 
 
-def resolve(spec: str) -> tuple[str, str | None]:
+def resolve(spec: str, fresh: bool = False) -> tuple[str, str | None]:
     """'models:/recsys-ranker@alias' or a run id -> (run_id, registry version or None)."""
     if spec.startswith(PREFIX):
-        v = alias_version(spec[len(PREFIX):])
+        v = alias_version(spec[len(PREFIX):], fresh=fresh)
         if v is None:
             raise LookupError(f"registry alias {spec} is not set")
         return run_of(v), v
