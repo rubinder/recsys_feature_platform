@@ -1,0 +1,69 @@
+{
+  "request_points": 3054,
+  "users": 565,
+  "days": 28,
+  "catalog": 3678,
+  "outcomes": "SIMULATED (counterfactual replay, 24h attribution)",
+  "deltas": [
+    {
+      "metric": "click",
+      "a": 0.39620170268500327,
+      "b": 0.44629993451211525,
+      "diff": 0.05009823182711198,
+      "rel": 0.12644628099173555,
+      "ci_low": 0.035027832351015066,
+      "ci_high": 0.06516044531761624,
+      "n_a": 3054,
+      "n_b": 3054,
+      "alpha": 0.05,
+      "significant": true
+    },
+    {
+      "metric": "hit@5",
+      "a": 0.2888015717092338,
+      "b": 0.3235101506221349,
+      "diff": 0.03470857891290111,
+      "rel": 0.12018140589569147,
+      "ci_low": 0.019965618860510806,
+      "ci_high": 0.04977079240340537,
+      "n_a": 3054,
+      "n_b": 3054,
+      "alpha": 0.05,
+      "significant": true
+    },
+    {
+      "metric": "ndcg@10",
+      "a": 0.0979917286544336,
+      "b": 0.1096778301731206,
+      "diff": 0.011686101518687007,
+      "rel": 0.11925599924762902,
+      "ci_low": 0.006804901668122919,
+      "ci_high": 0.01635343243957608,
+      "n_a": 3054,
+      "n_b": 3054,
+      "alpha": 0.05,
+      "significant": true
+    },
+    {
+      "metric": "coverage",
+      "a": 0.08183795541054921,
+      "b": 0.21941272430668843,
+      "diff": 0.13757476889613923,
+      "rel": 1.6810631229235884,
+      "ci_low": 0.13228928765633496,
+      "ci_high": 0.14236269711799893,
+      "n_a": 3054,
+      "n_b": 3054,
+      "alpha": 0.05,
+      "significant": true
+    }
+  ],
+  "staleness": {
+    "batch_unreflected_events_mean": 71.80288146692862,
+    "batch_requests_with_unreflected_events": 0.8156516044531762,
+    "batch_information_lag_hours_mean": 195.4667524376046,
+    "batch_feature_age_days_mean": 10.968353855144436,
+    "streaming_unreflected_events_mean": 0.0,
+    "streaming_information_lag_hours_mean": 0.0
+  }
+}

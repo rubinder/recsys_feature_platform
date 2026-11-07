@@ -50,9 +50,22 @@ def with_features(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet = BATC
     return out
 
 
-def prepare(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet, als: ALSModel, t: datetime | None) -> pd.DataFrame:
-    """Feature join plus request-time derived features (t=None: per-row event_timestamp)."""
-    rows = with_features(store, rows, fs)
+def with_latest_features(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet, latest: datetime) -> pd.DataFrame:
+    """The naive join (benchmark only): every row gets feature values as of `latest`,
+    regardless of its own timestamp, i.e. "join the latest feature table"."""
+    pairs = rows[["user_id", "item_id"]].drop_duplicates().assign(event_timestamp=pd.Timestamp(latest))
+    feats = store.get_historical_features(entity_df=pairs, features=fs.refs).to_df().drop(columns=["event_timestamp"])
+    out = rows.merge(feats, on=["user_id", "item_id"], how="left", validate="many_to_one")
+    if len(out) != len(rows):
+        raise RuntimeError("feature join changed row count")
+    return out
+
+
+def prepare(store: FeatureStore, rows: pd.DataFrame, fs: FeatureSet, als: ALSModel, t: datetime | None,
+            latest: datetime | None = None) -> pd.DataFrame:
+    """Feature join plus request-time derived features (t=None: per-row event_timestamp).
+    `latest` switches to the naive latest-value join (Phase 4 benchmark)."""
+    rows = with_features(store, rows, fs) if latest is None else with_latest_features(store, rows, fs, latest)
     if not fs.uses_stream:
         return rows
     return add_stream_derived(rows, als, None if t is None else pd.Timestamp(t))
