@@ -60,6 +60,7 @@ def recommendations(
     variant: str | None = None,
     as_of: datetime | None = Query(default=None, description="event-time 'now' (ISO 8601); default: serving cutoff"),
     cache: bool = Query(default=True, description="use the item-feature cache if enabled"),
+    k: int | None = Query(default=None, ge=10, le=1000, description="candidates to score (default: model's K)"),
     log_impression: bool = True,
 ) -> dict:
     rec: Recommender = STATE["rec"]
@@ -67,7 +68,7 @@ def recommendations(
         raise HTTPException(status_code=404, detail=f"unknown variant {variant!r}")
     m = rec.models[variant or rec.default_variant]
     try:
-        r = rec.recommend(user_id, n or m.manifest["top_n"], variant, as_of, cache)
+        r = rec.recommend(user_id, n or m.manifest["top_n"], variant, as_of, cache, k)
     except Exception as exc:  # surfaced as 503 so callers can retry
         log.exception("recommendation failed for user %s", user_id)
         raise HTTPException(status_code=503, detail="recommendation failed") from exc

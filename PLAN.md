@@ -296,3 +296,28 @@ Done, except the steps that create billable cloud resources (`terraform apply`,
 locking instead of DynamoDB (deprecated); stable Snowflake provider resources
 (`*_aws`, `*_external_s3`, `*_parquet`); security hardening of local services
 (ADR 0014).
+
+---
+
+## Phase 4: Benchmarks
+
+### Goal
+
+Reproducible experiments, one knob each, with measured before/after numbers and
+confidence intervals, regenerated into the README by `make benchmarks`.
+
+### Design
+
+- `benchmarks/compare.py`: paired / independent / aggregate-statistic deltas with
+  seeded bootstrap CIs (reused by Phase 5's lift analysis).
+- Experiments: (1) freshness, batch vs batch + streaming, paired over the 28-day
+  replay, plus staleness at request time; (2) PIT vs naive latest-value join,
+  evaluated as served; (3) latency, cache × K, median of 3 runs; (4) ablation,
+  grouped 5-fold CV over all session-anchored queries.
+- Results JSON + MLflow runs; README section between markers; two charts.
+
+### Status
+
+Done. See [docs/phase-4.md](docs/phase-4.md). Changes during implementation:
+ablation moved from a holdout to grouped CV for statistical power;
+`statistic_diff` became bias-corrected.

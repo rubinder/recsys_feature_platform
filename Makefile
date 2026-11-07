@@ -1,7 +1,7 @@
 .PHONY: setup data features materialize parity train train-streaming serve latency demo test docs-capture clean \
         pipeline dagster-dev quality freshness \
         snowflake-keys terraform-bootstrap terraform-init terraform-plan terraform-apply terraform-destroy \
-        terraform-outputs demo-snowflake \
+        terraform-outputs demo-snowflake benchmarks benchmarks-report \
         stream-up stream-down flink-ui stream-reset backfill-streaming flink-features produce simulate metrics stream-parity demo-streaming
 RUN := uv run
 DAGSTER_HOME := $(CURDIR)/data/dagster
@@ -108,6 +108,17 @@ demo-streaming: ## after `make demo`: train variants, live replay + DLQ, determi
 	$(RUN) python -c "from recsys.streaming import progress as p, events as e; p.wait_for(p.client(), e.history_end_seq(e.ordered_events()) - 1, 1800, 0.2)"
 	./scripts/demo_streaming_live.sh
 	$(MAKE) stream-reset flink-features simulate metrics stream-parity
+
+# ---- Phase 4: benchmarks ----------------------------------------------------
+BENCH ?= pit,ablation,latency,freshness
+
+benchmarks: ## every experiment (needs `make demo` + `make demo-streaming` once), then README + charts
+	$(MAKE) train-streaming stream-up
+	docker compose restart app && docker compose up -d --wait app
+	$(RUN) python -m benchmarks.run --only $(BENCH)
+
+benchmarks-report: ## regenerate the README RESULTS section and charts from benchmarks/results/
+	$(RUN) python -m benchmarks.report
 
 # ---- Phase 3: infrastructure (real AWS + Snowflake) ---------------------------
 # Credentials come from your environment: AWS profile/SSO, and SNOWFLAKE_* derived

@@ -120,7 +120,7 @@ class Recommender:
 
     # ---- request ------------------------------------------------------------------
     def recommend(self, user_id: int, n: int, variant: str | None = None, as_of: datetime | None = None,
-                  use_cache: bool = True) -> Result:
+                  use_cache: bool = True, k: int | None = None) -> Result:
         m = self.models[variant or self.default_variant]
         as_of = as_of or datetime.fromisoformat(m.manifest["serving_as_of"])
         if as_of.tzinfo is None:
@@ -128,7 +128,7 @@ class Recommender:
         rid = uuid.uuid4().hex
         timings: dict[str, float] = {}
         t0 = time.perf_counter()
-        k = m.manifest["candidates_k"]
+        k = k or m.manifest["candidates_k"]  # candidates fetched from the online store (benchmark knob)
         # Streaming variants also drop items the user consumed since the batch cutoff
         # (known from stream_last_items), so over-fetch by LAST_N before filtering.
         res = candidates.top_k(m.als, user_id, k + (LAST_N if m.fs.uses_stream else 0))

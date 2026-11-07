@@ -47,18 +47,18 @@ def run_id_file(variant: str) -> Path:
     return ARTIFACTS / ("latest_run_id" if variant == "batch" else f"latest_run_id_{variant}")
 
 
-def _rows(events, anchor_list, horizon_end, split, store, fs: FeatureSet, anchor_mode: str):
+def _rows(events, anchor_list, horizon_end, split, store, fs: FeatureSet, anchor_mode: str, latest=None):
     frames, stats = [], []
     for t in anchor_list:
         if anchor_mode == "weekly":
             end = min(t + pd.Timedelta(days=split.label_window_days), horizon_end)
             rows, s, model = labels.build_rows(events, t, end, split.candidates_k, split.seed)
-            frames.append(evaluate.prepare(store, rows, fs, model, t))
+            frames.append(evaluate.prepare(store, rows, fs, model, t, latest))
         else:
             week_end = t + pd.Timedelta(days=split.snapshot_cadence_days)
             rows, s, model = labels.build_session_rows(
                 events, t, week_end, horizon_end, split.label_window_days, split.candidates_k, split.seed)
-            frames.append(evaluate.prepare(store, rows, fs, model, None))
+            frames.append(evaluate.prepare(store, rows, fs, model, None, latest))
         stats.append(s)
     rows = pd.concat(frames, ignore_index=True)
     return rows.sort_values(SORT[0], ascending=SORT[1], ignore_index=True), stats
@@ -75,24 +75,43 @@ def popular_items(t, n: int = 100) -> list[int]:
     return pop.sort_values(["item_interaction_count", "item_id"], ascending=[False, True]).item_id.head(n).tolist()
 
 
+def load_events() -> pd.DataFrame:
+    events = pd.read_parquet(RAW / "events.parquet")
+    events["timestamp"] = pd.to_datetime(events["timestamp"], utc=True)
+    return events
+
+
+def datasets(fs: FeatureSet, anchor_mode: str = "weekly", join: str = "pit", events: pd.DataFrame | None = None):
+    """Training and validation rows with features. join="latest" is the naive (leaky) join, for benchmarks."""
+    split = load_split()
+    store = get_store()
+    events = load_events() if events is None else events
+    latest = split.validation_end if join == "latest" else None
+    train_anchors = labels.anchors(split.train_end, split.ranker_window_days, split.snapshot_cadence_days)
+    val_anchors = labels.anchors(split.validation_end, split.ranker_window_days, split.snapshot_cadence_days)
+    train_rows, train_stats = _rows(events, train_anchors, split.train_end, split, store, fs, anchor_mode, latest)
+    val_rows, val_stats = _rows(events, val_anchors, split.validation_end, split, store, fs, anchor_mode, latest)
+    log.info("feature set %s (%s anchors, %s join): %d train rows, %d validation rows",
+             fs.name, anchor_mode, join, len(train_rows), len(val_rows))
+    return train_rows, val_rows, train_stats + val_stats
+
+
+def fit(train_rows: pd.DataFrame, val_rows: pd.DataFrame, cols: list[str], seed: int):
+    return ranker.fit(
+        to_matrix(train_rows, cols), train_rows.label.to_numpy(), _groups(train_rows),
+        to_matrix(val_rows, cols), val_rows.label.to_numpy(), _groups(val_rows), cols, seed)
+
+
 def train(fs: FeatureSet, anchor_mode: str = "weekly") -> tuple[str, dict]:
     split = load_split()
     store = get_store()
-    events = pd.read_parquet(RAW / "events.parquet")
-    events["timestamp"] = pd.to_datetime(events["timestamp"], utc=True)
-
-    train_anchors = labels.anchors(split.train_end, split.ranker_window_days, split.snapshot_cadence_days)
-    val_anchors = labels.anchors(split.validation_end, split.ranker_window_days, split.snapshot_cadence_days)
-    train_rows, train_stats = _rows(events, train_anchors, split.train_end, split, store, fs, anchor_mode)
-    val_rows, val_stats = _rows(events, val_anchors, split.validation_end, split, store, fs, anchor_mode)
-    log.info("feature set %s: %d train rows, %d validation rows", fs.name, len(train_rows), len(val_rows))
+    events = load_events()
+    train_rows, val_rows, all_stats = datasets(fs, anchor_mode, "pit", events)
+    n_train_anchors = len(labels.anchors(split.train_end, split.ranker_window_days, split.snapshot_cadence_days))
+    train_stats, val_stats = all_stats[:n_train_anchors], all_stats[n_train_anchors:]
 
     cols = fs.model_features
-    booster = ranker.fit(
-        to_matrix(train_rows, cols), train_rows.label.to_numpy(), _groups(train_rows),
-        to_matrix(val_rows, cols), val_rows.label.to_numpy(), _groups(val_rows),
-        cols, split.seed,
-    )
+    booster = fit(train_rows, val_rows, cols, split.seed)
     best = booster.best_score["validation"]
     log.info("ranker best iteration %d, validation %s", booster.best_iteration, dict(best))
 

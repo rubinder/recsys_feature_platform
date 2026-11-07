@@ -1,0 +1,37 @@
+{
+  "configs": {
+    "pit": {
+      "val_ndcg@10": 0.19369072787822428,
+      "test_ndcg@10": 0.28323326957446693,
+      "best_iteration": 51,
+      "optimism": -0.08954254169624265,
+      "mlflow_run_id": "727f76d421b2452e9c73ecee2f3cc476"
+    },
+    "latest": {
+      "val_ndcg@10": 0.23209519834529602,
+      "test_ndcg@10": 0.274835067393254,
+      "best_iteration": 79,
+      "optimism": -0.04273986904795796,
+      "mlflow_run_id": "58000e5957e54d8ca73c754c9d081697"
+    }
+  },
+  "leakage": {
+    "train_rows_with_future_values": 1.0,
+    "item_count_gain_positive_rows": 254.0699166132136,
+    "item_count_gain_negative_rows": 201.0044902050875
+  },
+  "test_delta": {
+    "metric": "test_ndcg@10",
+    "a": 0.28323326957446693,
+    "b": 0.274835067393254,
+    "diff": -0.00839820218121293,
+    "rel": -0.02965118537744706,
+    "ci_low": -0.017861249109709088,
+    "ci_high": 0.0005466353671639584,
+    "n_a": 1176,
+    "n_b": 1176,
+    "alpha": 0.05,
+    "significant": false
+  },
+  "users": 1176
+}
