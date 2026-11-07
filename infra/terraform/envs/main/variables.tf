@@ -36,3 +36,12 @@ variable "enable_elasticache" {
   type        = bool
   default     = false
 }
+variable "enable_eks" {
+  description = "EKS + ECR, ~$110/month while it exists (Phase 5 optional)."
+  type        = bool
+  default     = false
+}
+variable "eks_public_access_cidrs" {
+  type    = list(string)
+  default = []
+}

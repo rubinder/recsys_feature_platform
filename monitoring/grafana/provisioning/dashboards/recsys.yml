@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: recsys
+    folder: recsys
+    type: file
+    options: {path: /var/lib/grafana/dashboards}

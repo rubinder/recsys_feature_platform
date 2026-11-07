@@ -102,11 +102,18 @@ def fit(train_rows: pd.DataFrame, val_rows: pd.DataFrame, cols: list[str], seed:
         to_matrix(val_rows, cols), val_rows.label.to_numpy(), _groups(val_rows), cols, seed)
 
 
-def train(fs: FeatureSet, anchor_mode: str = "weekly") -> tuple[str, dict]:
+def train(fs: FeatureSet, anchor_mode: str = "weekly", record: bool = True,
+          demo_shuffle_labels: bool = False) -> tuple[str, dict]:
+    """Train, evaluate, log to MLflow. record=False leaves the variant's latest-run pointer alone.
+    demo_shuffle_labels deliberately breaks the model (Phase 5 rollback/rejection demo only)."""
     split = load_split()
     store = get_store()
     events = load_events()
     train_rows, val_rows, all_stats = datasets(fs, anchor_mode, "pit", events)
+    if demo_shuffle_labels:
+        rng = np.random.default_rng(split.seed)
+        train_rows["label"] = train_rows.groupby(["event_timestamp", "user_id"]).label.transform(
+            lambda s: rng.permutation(s.to_numpy()))
     n_train_anchors = len(labels.anchors(split.train_end, split.ranker_window_days, split.snapshot_cadence_days))
     train_stats, val_stats = all_stats[:n_train_anchors], all_stats[n_train_anchors:]
 
@@ -122,7 +129,7 @@ def train(fs: FeatureSet, anchor_mode: str = "weekly") -> tuple[str, dict]:
                     "train_queries": float(len(_groups(train_rows))), "train_positive_rate": float(train_rows.label.mean())})
 
     tracking.setup()
-    variant = variant_name(fs.name, anchor_mode)
+    variant = variant_name(fs.name, anchor_mode) + ("_shuffled" if demo_shuffle_labels else "")
     with mlflow.start_run(run_name=f"two-stage-{variant}") as run:
         mlflow.log_params({f"split.{k}": v for k, v in split.model_dump(mode="json").items()})
         mlflow.log_params({f"als.{k}": v for k, v in candidates.ALS_PARAMS.items()})
@@ -154,7 +161,8 @@ def train(fs: FeatureSet, anchor_mode: str = "weekly") -> tuple[str, dict]:
         run_id = run.info.run_id
 
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    run_id_file(variant).write_text(run_id)
+    if record:
+        run_id_file(variant).write_text(run_id)
     return run_id, metrics
 
 

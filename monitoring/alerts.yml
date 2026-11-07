@@ -1,0 +1,44 @@
+groups:
+  - name: recsys-slo
+    rules:
+      - alert: ServingLatencySLOBreach
+        expr: histogram_quantile(0.99, sum by (le) (rate(recsys_request_latency_seconds_bucket[2m]))) > 0.05
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: "p99 serving latency above the 50 ms SLO"
+          description: "p99 = {{ $value | humanizeDuration }} over the last 2 minutes."
+      - alert: ServingErrorRate
+        expr: (sum(rate(recsys_requests_total{status!="200"}[2m])) or vector(0)) / clamp_min(sum(rate(recsys_requests_total[2m])), 1e-9) > 0.01
+        for: 1m
+        labels: {severity: page}
+        annotations: {summary: "More than 1% of recommendation requests are failing"}
+  - name: recsys-data
+    rules:
+      - alert: FeatureDrift
+        expr: max by (feature, entity) (recsys_feature_psi) > 0.25
+        for: 1m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Feature {{ $labels.feature }} drifted (PSI {{ $value | printf \"%.2f\" }} > 0.25)"
+      - alert: PredictionDrift
+        expr: max by (variant) (recsys_prediction_psi) > 0.25
+        for: 1m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Score distribution of {{ $labels.variant }} shifted (PSI {{ $value | printf \"%.2f\" }})"
+      - alert: BatchFeaturesStale
+        expr: recsys_batch_feature_age_days > 8
+        for: 1m
+        labels: {severity: ticket}
+        annotations: {summary: "Batch features are {{ $value | printf \"%.1f\" }} days old (SLA 8)"}
+      - alert: StreamingLag
+        expr: recsys_stream_lag_seconds > 300
+        for: 1m
+        labels: {severity: page}
+        annotations: {summary: "Streaming features lag {{ $value }} s of event time (SLA 300 s)"}
+      - alert: DriftMonitorDown
+        expr: time() - recsys_monitor_last_run_timestamp > 300
+        for: 1m
+        labels: {severity: ticket}
+        annotations: {summary: "The drift exporter has not completed a run for 5 minutes"}

@@ -18,3 +18,4 @@ infra/terraform/**/terraform.tfvars
 infra/terraform/**/backend.hcl
 infra/terraform/**/backend_override.tf
 infra/terraform/**/tfplan
+infra/terraform/**/tfplan-eks

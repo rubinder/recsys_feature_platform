@@ -1,0 +1,23 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ .Release.Name }}-redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: recsys-redis}}
+  template:
+    metadata: {labels: {app: recsys-redis}}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          ports: [{containerPort: 6379}]
+          readinessProbe: {exec: {command: [redis-cli, ping]}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ .Release.Name }}-redis}
+spec:
+  selector: {app: recsys-redis}
+  ports: [{port: 6379}]
+{{- end }}

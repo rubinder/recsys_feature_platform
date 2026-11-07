@@ -8,11 +8,14 @@ model sees the same feature values in both places.
 The data infrastructure is the deliverable; the models (implicit ALS +
 LightGBM LambdaRank) are off-the-shelf.
 
-> **Status: Phase 4 of 5.** Core feature platform (Phase 1), streaming features
-> and the measurement loop (Phase 2), Dagster orchestration with blocking data
-> quality checks and Terraform for real AWS + Snowflake (Phase 3), and a
-> benchmark suite with confidence intervals (Phase 4). The production loop
-> (experimentation, registry, monitoring) follows (see [PLAN.md](PLAN.md)).
+> **Status: complete (5 of 5 phases).** Feature store with online/offline
+> consistency (1), streaming features and the measurement loop (2), Dagster
+> orchestration, data quality and Terraform for AWS + Snowflake (3), benchmarks
+> with confidence intervals (4), and the production loop: A/B testing, model
+> registry with gated promotion and rollback, drift monitoring and alerting (5).
+>
+> **Start here:** [one-page overview](docs/overview.md) ·
+> [10-minute walkthrough](docs/walkthrough.md) · [talking points](docs/talking-points.md)
 
 ## Architecture
 
@@ -44,18 +47,24 @@ flowchart LR
   FLINK --> FS[Feast feature server] --> REDIS
   FLINK -->|append-only parts| OFF
 
-  MLF --> API[FastAPI<br/>variants · cache]
+  TRAIN --> RGY[(MLflow registry<br/>champion · challenger)]:::new
+  RGY -->|gate: data quality +<br/>non-inferiority| RGY
+  RGY -->|aliases, hot reload| API[FastAPI<br/>variants · cache ·<br/>A/B assignment]
   REDIS --> API
   API --> IMP[(Impression log)]
   PROD --> INT[(Interaction log)]
   IMP --> MET[rec_quality_report]
   INT --> MET
+  IMP --> LIFT[A/B lift analysis<br/>CIs · SRM · guardrails]:::new
+  API -->|/metrics| PROM[Prometheus<br/>alert rules]:::new
+  DRIFT[Drift exporter<br/>PSI · freshness]:::new --> PROM
+  PROM --> GRAF[Grafana]:::new
 
-  Q[Pandera + freshness SLAs]:::new -.-> DAG
-  TF[Terraform: S3 · IAM · budget · Snowflake<br/>MSK + ElastiCache opt-in]:::new -.-> OFF
+  Q[Pandera + freshness SLAs] -.-> DAG
+  TF[Terraform: S3 · IAM · budget · Snowflake<br/>MSK · ElastiCache · EKS opt-in] -.-> OFF
 ```
 
-Blue = added in Phase 3. "· or X" marks the cloud equivalent selected by
+Blue = added in Phase 5. "· or X" marks the cloud equivalent selected by
 `RECSYS_PROFILE=cloud` / provisioned by Terraform; the default is fully local.
 
 ## How online/offline consistency works
@@ -146,6 +155,21 @@ Details in [docs/phase-3.md](docs/phase-3.md).
   downstream assets.
 - **Terraform** against real AWS + Snowflake: `plan` = 38 resources (46 with MSK
   + ElastiCache), estimated ~$2/month by default. Not applied by automation.
+
+### Phase 5: the production loop
+
+Details in [docs/phase-5.md](docs/phase-5.md).
+
+- **A/B test** (565 users, hash-assigned, simulated outcomes): treatment CTR +8.8%
+  per user, permutation p = 0.43, SRM ok, guardrails ok: **inconclusive**. The
+  paired replay finds the same direction with a CI excluding zero; a 50/50
+  between-user test at this size lacks power.
+- **Registry + gate:** retrained streaming challenger promoted (NDCG@10 +0.016
+  [−0.002, +0.034], data quality ok); shuffled-label challenger rejected (−0.108);
+  rollback restores the previous champion and serving follows immediately.
+- **Monitoring:** p99 28.8 ms at 54 req/s (SLO 50 ms), 0% errors, 99.5% cache hit
+  rate; drift and staleness alerts firing for real shifts (holiday returning users
+  vs November sign-ups; batch features 28 days old after the replay).
 
 <!-- BENCHMARKS:START -->
 
@@ -264,6 +288,18 @@ make benchmarks BENCH=pit,ablation # a subset
 make benchmarks-report             # re-render README tables + charts from benchmarks/results/
 ```
 
+Production loop (Phase 5), after `make demo-streaming`:
+
+```bash
+make demo-production-loop   # registry, A/B experiment, retrain + gate, bad challenger, rollback
+make monitor-up             # Grafana http://localhost:3001 · Prometheus :9090 · MLflow :5000
+make experiment && make lift
+make retrain                # Dagster: challenger -> gate -> promote or reject
+make rollback
+make k8s-deploy K8S=1       # optional: kind + Helm; make loadtest K8S=1 (p99 SLO gate)
+make eks-plan EKS=1         # optional: EKS + ECR + ElastiCache plan (billable if applied)
+```
+
 Flink dashboard: `make flink-ui`, then http://localhost:8081 (the REST port is not
 published by default because it accepts unauthenticated job submissions). Kafka,
 Flink and the Feast feature server
@@ -283,6 +319,8 @@ curl localhost:8000/latency                     # server-side p50/p95/p99 per st
 - [Phase 2 write-up](docs/phase-2.md): streaming features, cache, logging, metrics, and the bugs found on the way
 - [Phase 3 write-up](docs/phase-3.md): Dagster, data quality and freshness, Terraform, local → cloud mapping, costs
 - [Phase 4 write-up](docs/phase-4.md): benchmark methodology, mechanisms, reproducibility
+- [Phase 5 write-up](docs/phase-5.md): A/B testing, registry and promotion gate, monitoring, optional K8s/EKS
+- [Overview](docs/overview.md) · [Walkthrough](docs/walkthrough.md) · [Talking points](docs/talking-points.md)
 - [Decision records](docs/decisions/)
 - [Captured output and screenshots](docs/img/)
 - [PLAN.md](PLAN.md): the five-phase plan

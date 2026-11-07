@@ -34,3 +34,14 @@ variable "enable_msk" {
   type        = bool
   default     = false
 }
+
+variable "enable_eks" {
+  description = "EKS + ECR for in-VPC serving (~$110/month). Off by default."
+  type        = bool
+  default     = false
+}
+variable "eks_public_access_cidrs" {
+  description = "CIDRs allowed to reach the EKS API endpoint (e.g. your IP/32). Empty = private endpoint only."
+  type        = list(string)
+  default     = []
+}

@@ -9,10 +9,11 @@ import dagster as dg
 
 from recsys.orchestration.assets import ALL_ASSETS, LANDING, impression_logs, online_store, rec_quality_report
 from recsys.orchestration.checks import DQ_CHECKS, FRESHNESS_CHECKS
+from recsys.orchestration.registry_assets import REGISTRY_ASSETS, fresh_features_retrain, retrain_job
 
 batch_pipeline = dg.define_asset_job(
     "batch_pipeline",
-    selection=dg.AssetSelection.all() - dg.AssetSelection.assets(impression_logs.key, rec_quality_report),
+    selection=dg.AssetSelection.all() - dg.AssetSelection.assets(impression_logs.key, rec_quality_report, *REGISTRY_ASSETS),
     description="raw ingest -> features -> Feast registry -> online store -> rankers -> offline metrics",
     config={"execution": {"config": {"multiprocess": {"max_concurrent": 2}}}},
 )
@@ -54,9 +55,9 @@ def logs_changed(context: dg.SensorEvaluationContext):
 
 
 defs = dg.Definitions(
-    assets=ALL_ASSETS,
+    assets=ALL_ASSETS + REGISTRY_ASSETS,
     asset_checks=DQ_CHECKS + FRESHNESS_CHECKS,
-    jobs=[batch_pipeline, freshness_job, measurement_job],
+    jobs=[batch_pipeline, freshness_job, measurement_job, retrain_job],
     schedules=[weekly, hourly_freshness],
-    sensors=[new_raw_data, logs_changed],
+    sensors=[new_raw_data, logs_changed, fresh_features_retrain],
 )

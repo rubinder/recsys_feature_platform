@@ -2,6 +2,8 @@
         pipeline dagster-dev quality freshness \
         snowflake-keys terraform-bootstrap terraform-init terraform-plan terraform-apply terraform-destroy \
         terraform-outputs demo-snowflake benchmarks benchmarks-report \
+        registry-up registry-bootstrap registry-status monitor-up experiment lift retrain retrain-bad promote \
+        rollback demo-production-loop k8s-deploy loadtest eks-plan eks-apply eks-destroy \
         stream-up stream-down flink-ui stream-reset backfill-streaming flink-features produce simulate metrics stream-parity demo-streaming
 RUN := uv run
 DAGSTER_HOME := $(CURDIR)/data/dagster
@@ -119,6 +121,68 @@ benchmarks: ## every experiment (needs `make demo` + `make demo-streaming` once)
 
 benchmarks-report: ## regenerate the README RESULTS section and charts from benchmarks/results/
 	$(RUN) python -m benchmarks.report
+
+# ---- Phase 5: production loop -----------------------------------------------
+registry-up: ## MLflow tracking server + registry UI on http://localhost:5000
+	docker compose --profile registry up -d --build --wait mlflow
+
+registry-bootstrap: ## register batch_session as champion v1 and streaming_session as challenger
+	$(RUN) python -m recsys.registry.cli bootstrap
+
+registry-status:
+	$(RUN) python -m recsys.registry.cli status
+
+monitor-up: ## Prometheus (:9090), Grafana (:3001), drift exporter, MLflow (:5000), plus the stream stack
+	docker compose --profile stream --profile monitor up -d --build --wait
+
+experiment: ## A/B test over DAYS of replay (API assigns users by hash), then the lift report
+	$(RUN) python -m recsys.streaming.reset
+	$(RUN) python -m recsys.streaming.flink_ctl submit
+	$(RUN) python -m recsys.streaming.simulate --days $(DAYS) --experiment
+	$(RUN) python -m recsys.experiments.lift
+
+lift: ## lift report from the current logs
+	$(RUN) python -m recsys.experiments.lift
+
+retrain: ## Dagster job: train a challenger on current features, gate it, promote or reject
+	$(DAGSTER) job execute $(DEFS) -j retrain_and_promote
+
+retrain-bad: ## demo: a deliberately broken challenger (shuffled labels) that the gate must reject
+	$(RUN) python -m recsys.registry.cli retrain --demo-bad-challenger
+
+promote: ## gate the current challenger against the champion
+	$(RUN) python -m recsys.registry.cli promote
+
+rollback: ## restore the previous champion (serving reloads within seconds)
+	$(RUN) python -m recsys.registry.cli rollback
+
+# Optional, flag-gated: K8S=1 (kind + Helm + Locust), EKS=1 (real AWS, billable).
+K8S ?= 0
+EKS ?= 0
+k8s-deploy: ## K8S=1: kind cluster + Helm release of the API on http://localhost:8080
+	@[ "$(K8S)" = "1" ] || ( echo "optional path: run with K8S=1 (needs kind, helm, kubectl)"; exit 1 )
+	./scripts/k8s_deploy.sh
+
+loadtest: ## K8S=1: 60 s Locust run against the cluster; fails if p99 > 50 ms (TARGET=... to override)
+	@[ "$(K8S)" = "1" ] || ( echo "optional path: run with K8S=1"; exit 1 )
+	uv run --group loadtest locust -f loadtest/locustfile.py --headless -u 32 -r 8 -t 60s --host $${TARGET:-http://localhost:8080}
+
+eks-plan: snowflake-keys terraform-init ## EKS=1: plan EKS + ECR + ElastiCache (read-only; ~$120/month if applied)
+	@[ "$(EKS)" = "1" ] || ( echo "optional, billable path: run with EKS=1"; exit 1 )
+	@$(SF_ENV) && cd $(TF_MAIN) && terraform plan -input=false $(TF_KEY) -var enable_eks=true -var enable_elasticache=true -out=tfplan-eks
+
+eks-apply: ## EKS=1, YOU run this: applies the saved EKS plan
+	@[ "$(EKS)" = "1" ] || ( echo "optional, billable path: run with EKS=1"; exit 1 )
+	@$(SF_ENV) && cd $(TF_MAIN) && terraform apply tfplan-eks
+
+eks-destroy: terraform-init ## EKS=1: remove EKS + ElastiCache again (keeps the rest of envs/main)
+	@[ "$(EKS)" = "1" ] || ( echo "run with EKS=1"; exit 1 )
+	@$(SF_ENV) && cd $(TF_MAIN) && terraform apply -input=false $(TF_KEY) -var enable_eks=false -var enable_elasticache=false
+
+demo-production-loop: ## after demo-streaming: registry, A/B experiment, retrain + gate, bad challenger, rollback
+	$(MAKE) train-streaming monitor-up registry-bootstrap
+	docker compose restart app && docker compose up -d --wait app
+	$(MAKE) experiment retrain retrain-bad rollback registry-status
 
 # ---- Phase 3: infrastructure (real AWS + Snowflake) ---------------------------
 # Credentials come from your environment: AWS profile/SSO, and SNOWFLAKE_* derived

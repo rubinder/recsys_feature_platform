@@ -92,8 +92,35 @@ def phase2() -> None:
         subprocess.run(["docker", "compose", "--profile", "flink-ui", "rm", "-sf", "flink-ui"], cwd=ROOT, check=True)
 
 
+def phase5() -> None:
+    """Needs `make monitor-up` and a completed `make experiment` (+ retrain/rollback for the registry view)."""
+    from playwright.sync_api import sync_playwright
+
+    from recsys import registry
+
+    py = sys.executable
+    (IMG / "phase5-lift-report.txt").write_text(run([py, "-m", "recsys.experiments.lift"]))
+    (IMG / "phase5-registry.json").write_text(json.dumps(registry.versions(), indent=2) + "\n")
+    shots = [
+        ("phase5-grafana.png", "http://127.0.0.1:3001/d/recsys-production-loop?orgId=1&from=now-45m&to=now&kiosk", 1600, 1250),
+        ("phase5-mlflow-registry.png", "http://127.0.0.1:5000/#/models/recsys-ranker", 1440, 800),
+        ("phase5-prometheus-alerts.png", "http://127.0.0.1:9090/alerts", 1440, 900),
+    ]
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        for name, url, w, h in shots:
+            page = b.new_page(viewport={"width": w, "height": h})
+            page.goto(url)
+            page.wait_for_timeout(8000)
+            page.screenshot(path=str(IMG / name), full_page=False)
+
+
 if __name__ == "__main__":
     IMG.mkdir(parents=True, exist_ok=True)
+    if PHASE == "phase5":
+        phase5()
+        print(f"wrote {sorted(p.name for p in IMG.glob('phase5-*'))}")
+        sys.exit(0)
     if PHASE == "phase2":
         phase2()
         print(f"wrote {sorted(p.name for p in IMG.glob('phase2-*'))}")

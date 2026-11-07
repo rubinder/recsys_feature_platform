@@ -13,9 +13,9 @@ def test_definitions_load_with_jobs_schedules_sensors():
     from recsys.orchestration.definitions import defs
 
     repo = defs.get_repository_def()
-    assert {"batch_pipeline", "freshness_checks", "measurement"} <= set(repo.job_names)
+    assert {"batch_pipeline", "freshness_checks", "measurement", "retrain_and_promote"} <= set(repo.job_names)
     assert {s.name for s in repo.schedule_defs} == {"weekly_batch", "hourly_freshness"}
-    assert {s.name for s in repo.sensor_defs} == {"new_raw_data", "logs_changed"}
+    assert {s.name for s in repo.sensor_defs} == {"new_raw_data", "logs_changed", "fresh_features_retrain"}
     keys = {k.to_user_string() for k in repo.asset_graph.get_all_asset_keys()}
     assert {"raw_events", "batch_features", "online_store", "ranker_streaming_session", "rec_quality_report"} <= keys
 

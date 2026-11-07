@@ -56,8 +56,10 @@ def main() -> None:
     ap.add_argument("--refresh-every", type=int, default=10, help="request at session start and every N events")
     ap.add_argument("--api", default="http://localhost:8000")
     ap.add_argument("--skip-history", action="store_true")
+    ap.add_argument("--experiment", action="store_true",
+                    help="A/B mode: one request per request point, the API assigns the variant")
     args = ap.parse_args()
-    variants = [v for v in args.variants.split(",") if v]
+    variants = [None] if args.experiment else [v for v in args.variants.split(",") if v]
 
     split = load_split()
     ev = ordered_events()
@@ -67,7 +69,9 @@ def main() -> None:
     p = kafka_io.producer()
     api = httpx.Client(base_url=args.api, timeout=30)
     health = api.get("/health").json()
-    missing = set(variants) - set(health["variants"])
+    if args.experiment and not health.get("experiment"):
+        raise SystemExit("API has no active experiment (config/experiments.yaml + registry aliases)")
+    missing = set(v for v in variants if v) - set(health["variants"])
     if missing:
         raise SystemExit(f"API does not serve variants {missing}; serving {health['variants']}")
 
@@ -87,11 +91,12 @@ def main() -> None:
             p.flush()
             wait_total += progress.wait_for(r, int(row.seq) - 1)
             for v in variants:
-                resp = api.get(f"/recommendations/{int(row.user_id)}",
-                               params={"variant": v, "as_of": row.timestamp.isoformat(), "n": split.top_n})
+                params = {"as_of": row.timestamp.isoformat(), "n": split.top_n} | ({"variant": v} if v else {})
+                resp = api.get(f"/recommendations/{int(row.user_id)}", params=params)
                 resp.raise_for_status()
-                requests_log.append({"request_id": resp.json()["request_id"], "trigger_seq": int(row.seq),
-                                     "variant": v, "session_pos": int(row.session_pos)})
+                body = resp.json()
+                requests_log.append({"request_id": body["request_id"], "trigger_seq": int(row.seq),
+                                     "variant": body["variant"], "session_pos": int(row.session_pos)})
                 n_req += 1
         e = to_contract(row)
         kafka_io.send(p, kafka_io.TOPIC, e.model_dump_json().encode())

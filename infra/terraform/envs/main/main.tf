@@ -42,17 +42,19 @@ locals {
 }
 
 module "aws" {
-  source                 = "../../modules/aws"
-  prefix                 = var.prefix
-  account_id             = data.aws_caller_identity.me.account_id
-  region                 = var.region
-  snowflake_role_name    = local.snowflake_role_name
-  snowflake_iam_user_arn = module.snowflake.storage_aws_iam_user_arn
-  snowflake_external_id  = module.snowflake.storage_aws_external_id
-  budget_limit_usd       = var.budget_limit_usd
-  alert_email            = var.alert_email
-  enable_msk             = var.enable_msk
-  enable_elasticache     = var.enable_elasticache
+  source                  = "../../modules/aws"
+  prefix                  = var.prefix
+  account_id              = data.aws_caller_identity.me.account_id
+  region                  = var.region
+  snowflake_role_name     = local.snowflake_role_name
+  snowflake_iam_user_arn  = module.snowflake.storage_aws_iam_user_arn
+  snowflake_external_id   = module.snowflake.storage_aws_external_id
+  budget_limit_usd        = var.budget_limit_usd
+  alert_email             = var.alert_email
+  enable_msk              = var.enable_msk
+  enable_elasticache      = var.enable_elasticache
+  enable_eks              = var.enable_eks
+  eks_public_access_cidrs = var.eks_public_access_cidrs
 }
 
 module "snowflake" {
