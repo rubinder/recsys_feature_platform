@@ -67,8 +67,12 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   selector: {app: recsys-api}
-  {{- if and (eq .Values.service.type "LoadBalancer") .Values.service.sourceRanges }}
+  {{- if eq .Values.service.type "LoadBalancer" }}
+  {{- if .Values.service.sourceRanges }}
   loadBalancerSourceRanges: {{- toYaml .Values.service.sourceRanges | nindent 4 }}
+  {{- else if not .Values.service.allowPublic }}
+  {{- fail "service.sourceRanges is required for a LoadBalancer (fail closed); set service.allowPublic=true to expose it to the internet on purpose" }}
+  {{- end }}
   {{- end }}
   ports:
     - port: 80

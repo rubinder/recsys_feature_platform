@@ -19,6 +19,7 @@ service:
   type: NodePort        # kind maps nodePort 30080 -> localhost:8080; use LoadBalancer on EKS
   nodePort: 30080
   sourceRanges: []
+  allowPublic: false     # a LoadBalancer without sourceRanges is refused unless this is true
 
 redis:
   enabled: true         # in-cluster Redis (kind). On EKS: false + externalSecret (ElastiCache)

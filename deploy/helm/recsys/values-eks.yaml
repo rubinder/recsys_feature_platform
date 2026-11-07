@@ -3,7 +3,8 @@ replicas: 2
 hostRoot: ""
 service:
   type: LoadBalancer
-  sourceRanges: []        # set to the operator's IP/32 by eks_session.py
+  sourceRanges: []
+  allowPublic: false     # a LoadBalancer without sourceRanges is refused unless this is true        # set to the operator's IP/32 by eks_session.py
 redis:
   enabled: false
   externalSecret: recsys-redis      # Secret with key `connection` (ElastiCache TLS + AUTH)
