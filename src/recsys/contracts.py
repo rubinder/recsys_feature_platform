@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SCHEMA_VERSION = 1
+IMPRESSION_SCHEMA_VERSION = 2  # v2 (Phase 5): optional latency_ms; v1 rows remain valid
 
 
 class _Contract(BaseModel):
@@ -46,9 +47,13 @@ class InteractionEvent(_Contract):
 
 
 class Impression(_Contract):
-    """What the serving layer showed, to whom, from which model."""
+    """What the serving layer showed, to whom, from which model.
 
-    schema_version: Literal[1] = SCHEMA_VERSION
+    Schema evolution is additive only: v2 added the optional `latency_ms`, so
+    readers handle both versions and v1 rows stay valid.
+    """
+
+    schema_version: Literal[1, 2] = IMPRESSION_SCHEMA_VERSION
     request_id: str = Field(min_length=8)
     user_id: int = Field(gt=0)
     items: list[int] = Field(min_length=1)
@@ -60,6 +65,7 @@ class Impression(_Contract):
     strategy: str
     timestamp: datetime  # event-time "now" the recommendation was made for
     served_at: datetime  # wall clock
+    latency_ms: float | None = Field(default=None, ge=0)  # v2: server-side total latency
 
     @model_validator(mode="after")
     def _aligned(self) -> Impression:

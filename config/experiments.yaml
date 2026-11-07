@@ -1,0 +1,16 @@
+# Online experiments. The API assigns a user to a variant when a request names
+# none and an experiment is active. Assignment is deterministic:
+#   bucket = sha256("<id>:<salt>:<user_id>") mod 10000, variants by cumulative weight.
+# Changing the salt reshuffles users (use it to start a fresh experiment).
+active: exp-streaming-features-001
+experiments:
+  exp-streaming-features-001:
+    description: Does adding streaming features to the ranker lift engagement?
+    salt: "2001-01"
+    variants:
+      control:   {model: champion,   weight: 0.5}   # registry alias
+      treatment: {model: challenger, weight: 0.5}
+    primary_metric: ctr
+    guardrails:
+      coverage_min_rel_change: -0.10   # coverage may not fall more than 10%
+      p99_latency_ms_max: 50           # serving SLO

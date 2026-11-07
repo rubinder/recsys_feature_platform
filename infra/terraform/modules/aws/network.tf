@@ -1,9 +1,10 @@
 # Private network for MSK / ElastiCache, created only when either is enabled.
-# No NAT gateway and no internet gateway: these services are only reachable from
-# compute inside the VPC (none is created in Phase 3; see docs/phase-3.md).
+# No NAT gateway. MSK and ElastiCache stay in private subnets, reachable only
+# from inside the VPC; the optional EKS cluster (eks.tf) adds public subnets for
+# its nodes so it can serve from next to ElastiCache.
 
 locals {
-  needs_vpc = var.enable_msk || var.enable_elasticache
+  needs_vpc = var.enable_msk || var.enable_elasticache || var.enable_eks
 }
 
 data "aws_availability_zones" "available" {

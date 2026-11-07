@@ -1,0 +1,22 @@
+{{- if .Values.materialize.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-materialize
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: materialize
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["python", "-m", "recsys.features.materialize"]
+          env:
+            {{- include "recsys.env" . | nindent 12 }}
+          {{- include "recsys.mounts" . | nindent 10 }}
+      {{- include "recsys.volumes" . | nindent 6 }}
+{{- end }}

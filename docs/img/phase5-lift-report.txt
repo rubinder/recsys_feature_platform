@@ -1,0 +1,18 @@
+A/B lift report: exp-streaming-features-001
+Outcomes are SIMULATED (counterfactual replay, 24h attribution).
+
+users: 262 control / 303 treatment   impressions: 1315 / 1739   users in both buckets: 0
+sample-ratio check: chi2 2.98, p 0.085 -> ok
+
+metric (per user)   control  treatment     diff  95% CI                   rel   perm p
+ctr                  0.2586     0.2815  +0.0228  [-0.0344, +0.0783]   +8.8%   0.4308
+hit@5                0.1571     0.2020  +0.0449  [-0.0028, +0.0919]  +28.6%   0.0680
+ndcg@10              0.0563     0.0668  +0.0105  [-0.0057, +0.0256]  +18.6%   0.1924
+(impression-level CTR z-test: z 2.73, p 0.0064; optimistic because impressions cluster within users)
+
+guardrails:
+  coverage        0.0680 -> 0.1827 (+168.8%; floor -10%)  ok
+  p99 latency     9.4 -> 13.6 ms (SLO 50 ms)  ok
+
+decision on primary metric (ctr): INCONCLUSIVE
+models: control ['4c7c91fde101485d9c4863578294455f'], treatment ['5fb7c7dafab7462683e5b63e6d73ffed']

@@ -28,7 +28,8 @@ def load(window_hours: float) -> pd.DataFrame:
     """One row per impression with `relevant` = items the user went on to interact with."""
     c = duckdb.connect()
     c.sql("SET timezone='UTC'")
-    imp = c.sql(f"SELECT * FROM read_parquet('{LOGS}/impressions/*/*.parquet', hive_partitioning=false)").df()
+    imp = c.sql(f"SELECT * FROM read_parquet('{LOGS}/impressions/*/*.parquet', hive_partitioning=false, "
+                "union_by_name=true)").df()  # union_by_name: v1 and v2 impression files side by side
     req = c.sql(f"SELECT * FROM read_parquet('{LOGS}/requests/requests.parquet')").df()
     inter = c.sql(f"SELECT seq, user_id, item_id, timestamp FROM read_parquet('{LOGS}/interactions/*/*.parquet', hive_partitioning=false)").df()
     imp = imp.merge(req[["request_id", "trigger_seq", "session_pos"]], on="request_id", how="inner")

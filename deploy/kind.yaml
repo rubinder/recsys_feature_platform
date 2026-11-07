@@ -1,0 +1,12 @@
+# Local Kubernetes for the optional K8S=1 path. The repo's data/ and mlruns/ are
+# mounted into the node at the same absolute path (MLflow and Feast record
+# absolute paths). scripts/k8s_deploy.sh renders HOST_ROOT.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - {hostPath: HOST_ROOT/data, containerPath: HOST_ROOT/data}
+      - {hostPath: HOST_ROOT/mlruns, containerPath: HOST_ROOT/mlruns}
+    extraPortMappings:
+      - {containerPort: 30080, hostPort: 8080, listenAddress: "127.0.0.1"}

@@ -29,9 +29,18 @@ from recsys.training.candidates import ALSModel
 AFFINITY_REF = "user_item_affinity:genre_affinity"
 
 
-def discover_variants() -> dict[str, str]:
-    """Variant name -> MLflow run id, from the run ids recorded by `make train*`."""
+def discover_variants(include_registry: bool = False) -> dict[str, str]:
+    """Variant name -> MLflow run id (or registry alias spec), from `make train*` and the registry."""
     out = {}
+    if include_registry:
+        from recsys import registry
+
+        try:
+            for alias in ("champion", "challenger"):
+                if registry.alias_version(alias):
+                    out[alias] = registry.PREFIX + alias
+        except Exception:  # registry not created yet
+            pass
     if (ARTIFACTS / "latest_run_id").exists():
         out["batch"] = (ARTIFACTS / "latest_run_id").read_text().strip()
     for p in sorted(ARTIFACTS.glob("latest_run_id_*")):
@@ -42,9 +51,9 @@ def discover_variants() -> dict[str, str]:
 
 
 def parse_variants(spec: str | None) -> dict[str, str]:
-    """MODEL_VARIANTS="name=run_id,name2=run_id2"; empty -> discover."""
+    """MODEL_VARIANTS="name=run_id_or_models:/...@alias,..."; empty -> discover (incl. registry aliases)."""
     if not spec:
-        return discover_variants()
+        return discover_variants(include_registry=True)
     return dict(part.split("=", 1) for part in spec.split(",") if part)
 
 
@@ -67,8 +76,8 @@ class Result:
 
 
 class ModelBundle:
-    def __init__(self, name: str, run_id: str) -> None:
-        self.name, self.run_id = name, run_id
+    def __init__(self, name: str, run_id: str, registry_version: str | None = None) -> None:
+        self.name, self.run_id, self.registry_version = name, run_id, registry_version
         d = Path(tempfile.mkdtemp(prefix=f"recsys-{name}-"))
         path = Path(mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model", dst_path=str(d)))
         self.als: ALSModel = ALSModel.load(path / "als.npz")
@@ -84,8 +93,36 @@ class Recommender:
                  cache: TTLCache | None, default_variant: str) -> None:
         tracking.setup()
         self.store, self.hist, self.cache = store, histogram, cache
-        self.models = {name: ModelBundle(name, rid) for name, rid in variants.items()}
+        self.specs = dict(variants)
+        self.models = {name: self._load(name, spec) for name, spec in self.specs.items()}
         self.default_variant = default_variant if default_variant in self.models else next(iter(self.models))
+
+    @staticmethod
+    def _load(name: str, spec: str) -> ModelBundle:
+        from recsys import registry
+
+        run_id, version = registry.resolve(spec)
+        return ModelBundle(name, run_id, version)
+
+    def reload(self) -> dict[str, str]:
+        """Re-resolve registry aliases; swap in any variant whose version changed (promotion/rollback)."""
+        from recsys import registry
+
+        changed = {}
+        for name, spec in self.specs.items():
+            if not spec.startswith(registry.PREFIX):
+                continue
+            try:
+                run_id, version = registry.resolve(spec)
+            except LookupError:  # alias removed (e.g. challenger rejected): stop serving it
+                if name in self.models and name != self.default_variant:
+                    self.models = {k: v for k, v in self.models.items() if k != name}
+                    changed[name] = "removed"
+                continue
+            if name not in self.models or run_id != self.models[name].run_id:
+                self.models = {**self.models, name: ModelBundle(name, run_id, version)}  # atomic swap
+                changed[name] = f"v{version} ({run_id[:8]})"
+        return changed
 
     # ---- online feature retrieval -------------------------------------------------
     def _features_direct(self, fs: FeatureSet, user_id: int, item_ids) -> pd.DataFrame:

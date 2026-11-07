@@ -1,0 +1,52 @@
+[
+  {
+    "version": 1,
+    "run_id": "4c7c91fde101485d9c4863578294455f",
+    "aliases": [
+      "champion"
+    ],
+    "variant": "batch_session",
+    "stage": "champion",
+    "gate": null
+  },
+  {
+    "version": 2,
+    "run_id": "5fb7c7dafab7462683e5b63e6d73ffed",
+    "aliases": [],
+    "variant": "streaming_session",
+    "stage": null,
+    "gate": null
+  },
+  {
+    "version": 3,
+    "run_id": "8588bbe6340b4f9e912ac069663eb8f9",
+    "aliases": [],
+    "variant": "streaming_session",
+    "stage": null,
+    "gate": null
+  },
+  {
+    "version": 4,
+    "run_id": "a8a06cbd74d340298a1c4c88b536b45f",
+    "aliases": [],
+    "variant": "streaming_session",
+    "stage": null,
+    "gate": null
+  },
+  {
+    "version": 5,
+    "run_id": "adc6496c7da84d4a81d3658be3321f8a",
+    "aliases": [],
+    "variant": "streaming_session",
+    "stage": "rolled-back",
+    "gate": "passed"
+  },
+  {
+    "version": 6,
+    "run_id": "b195d5d925b34e34b08a94eb7f652373",
+    "aliases": [],
+    "variant": "streaming_session_shuffled",
+    "stage": "rejected",
+    "gate": "rejected"
+  }
+]

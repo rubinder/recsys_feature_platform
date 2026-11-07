@@ -19,7 +19,7 @@ services:
       REDIS_CONNECTION: redis:6379
       MLFLOW_TRACKING_URI: sqlite:///${PWD}/mlruns/mlflow.db
       MODEL_VARIANTS: ${MODEL_VARIANTS:-}
-      DEFAULT_VARIANT: ${DEFAULT_VARIANT:-batch}
+      DEFAULT_VARIANT: ${DEFAULT_VARIANT:-champion}  # falls back to the first variant without a registry
       FEATURE_CACHE: ${FEATURE_CACHE:-on}
       FEATURE_CACHE_TTL_S: ${FEATURE_CACHE_TTL_S:-300}
     ports: ["127.0.0.1:8000:8000"]
@@ -119,3 +119,54 @@ services:
     environment: *flink-env
     volumes:
       - ./data/offline/user_stream:/opt/recsys-data/user_stream
+
+  # ---- production loop (Phase 5): `make monitor-up` --------------------------
+  mlflow:  # tracking server + model registry UI over the same SQLite store and artifacts
+    build: .
+    profiles: [monitor, registry]
+    command: ["mlflow", "server", "--backend-store-uri", "sqlite:///${PWD}/mlruns/mlflow.db",
+              "--default-artifact-root", "file://${PWD}/mlruns/artifacts", "--host", "0.0.0.0", "--port", "5000"]
+    ports: ["127.0.0.1:5000:5000"]
+    volumes:
+      - ./mlruns:${PWD}/mlruns
+    environment:
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+
+  drift-exporter:
+    build: .
+    profiles: [monitor]
+    command: ["python", "-m", "recsys.monitoring.exporter"]
+    depends_on:
+      redis: { condition: service_healthy }
+    environment:
+      REDIS_CONNECTION: redis:6379
+      REDIS_URL_HOST: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_HOST: kafka:29092
+      DRIFT_INTERVAL_S: "15"
+    volumes:
+      - ./data:/app/data
+
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    profiles: [monitor]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+
+  grafana:
+    image: grafana/grafana:13.0.1
+    profiles: [monitor]
+    ports: ["127.0.0.1:3001:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-locally}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/recsys.json
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro

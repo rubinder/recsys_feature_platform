@@ -321,3 +321,40 @@ confidence intervals, regenerated into the README by `make benchmarks`.
 Done. See [docs/phase-4.md](docs/phase-4.md). Changes during implementation:
 ablation moved from a holdout to grouped CV for statistical power;
 `statistic_diff` became bias-corrected.
+
+---
+
+## Phase 5: The production loop (experimentation, continuous training, monitoring)
+
+### Goal
+
+Close the loop: ship models through a registry with metric-gated promotion and
+rollback, test them with real per-user A/B assignment and significance testing,
+and watch serving and data health with Prometheus, Grafana and alert rules.
+Fully local and zero-cost by default.
+
+### Design
+
+| Piece | Design |
+|---|---|
+| Assignment | `sha256(experiment_id:salt:user_id) mod 10000` → variant by cumulative weights; config in `config/experiments.yaml`; the API assigns when a request names no variant and logs `experiment_id` + `variant` (fields reserved in Phase 2's impression contract) |
+| Experiment run | the Phase 2 lockstep simulator in `--experiment` mode: one request per request point, the API assigns |
+| Lift analysis | builds on `benchmarks/compare.py`: user-level (the randomization unit) deltas with bootstrap CIs, plus significance tests (two-proportion z-test for CTR, permutation test for NDCG@10), a sample-ratio-mismatch chi-square, and guardrails (coverage, p99 latency). Outcomes labelled simulated |
+| Registry | MLflow model registry (`recsys-ranker`), aliases `champion` / `challenger`; tracking server + UI in docker-compose; artifacts local by default, S3 under the cloud profile |
+| Promotion | challenger must (1) pass every Phase 3 data-quality check, (2) be non-inferior to the champion on held-out paired NDCG@10 (CI lower bound > −0.005); promote moves `champion`, keeps the previous version tagged for `rollback` |
+| Retraining | Dagster `retrain_and_promote` job; asset sensor re-runs it when features are re-materialized |
+| Serving | variants may be registry aliases (`models:/recsys-ranker@champion`); `/admin/reload` and a 30 s poll pick up promotions and rollbacks without a restart |
+| Monitoring | API exports Prometheus metrics (latency histogram, QPS, errors, cache hit rate); a drift exporter computes PSI for feature drift (online feature distribution vs the training reference) and prediction drift (served scores vs the first replay window) plus feature freshness; Grafana dashboard provisioned from JSON; alert rules on drift, p99 latency SLO and freshness |
+| Optional | `K8S=1`: Helm chart for the API on kind + a Locust load test checking the latency SLO; `EKS=1`: Terraform for ECR + EKS reusing the Phase 3 VPC, ElastiCache as the online store. Both flag-gated, never applied by automation |
+
+### Make targets
+
+`experiment`, `retrain`, `promote`, `rollback`, `registry-up`, `monitor-up`,
+`k8s-deploy`, `loadtest`, `eks-plan`, `eks-apply`, `eks-destroy`.
+
+### Status
+
+Done. See [docs/phase-5.md](docs/phase-5.md). Not executed: the K8S and EKS
+optional paths (tools not installed / billable). Changes during implementation:
+rejected challengers lose their alias and serving drops removed aliases; drift
+references use matching populations; `benchmarks` became part of the package.

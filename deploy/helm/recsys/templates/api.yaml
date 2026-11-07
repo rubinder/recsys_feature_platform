@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {app: recsys-api}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector: {matchLabels: {app: recsys-api}}
+  template:
+    metadata:
+      labels: {app: recsys-api}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/path: /metrics/, prometheus.io/port: "8000"}
+    spec:
+      securityContext: {runAsNonRoot: false}
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{containerPort: 8000, name: http}]
+          env:
+            {{- include "recsys.env" . | nindent 12 }}
+          readinessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 10, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 60, periodSeconds: 15}
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          {{- include "recsys.mounts" . | nindent 10 }}
+      {{- include "recsys.volumes" . | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+spec:
+  type: {{ .Values.service.type }}
+  selector: {app: recsys-api}
+  ports:
+    - port: 80
+      targetPort: http
+      {{- if eq .Values.service.type "NodePort" }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
